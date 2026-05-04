@@ -114,7 +114,7 @@ jobs:
       # backend-dev and tech-writer each shipped a banned-word checker that
       # covers PARTIAL surfaces (one Python — README + app/static + routes +
       # openapi + main.py; one Bash — landing/ + QUICKSTART + hf-space/).
-      # Both source `_workspace/f1-banned-words.regex` (C4 single source of
+      # Both source `scripts/f1-banned-words.regex` (C4 single source of
       # truth). We invoke BOTH in the same step until W2 unifies them; the
       # union is the actual coverage the spec §10 audit demands.
       #
@@ -125,11 +125,11 @@ jobs:
         run: python scripts/check_f1_banned_words.py
 
       - name: Run Bash checker (README + QUICKSTART + landing/ + hf-space/)
-        # The .sh script defaults REGEX_PATH to `../_workspace/f1-banned-words.regex`
+        # The .sh script defaults REGEX_PATH to `../scripts/f1-banned-words.regex`
         # (relative to its own location); when invoked from repo root we point
         # it at the in-repo canonical copy explicitly.
         env:
-          REGEX_PATH: _workspace/f1-banned-words.regex
+          REGEX_PATH: scripts/f1-banned-words.regex
         run: bash scripts/check_f1_banned_words.sh
 
   docker-build:

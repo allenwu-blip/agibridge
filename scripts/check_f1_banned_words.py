@@ -1,7 +1,7 @@
 """F-1 banned-word grep. Runs as pre-commit hook + CI.
 
 Per spec §10 (the audit checklist) and Phase D C4: the canonical regex source
-is `_workspace/f1-banned-words.regex` (committed to this repo). All three users
+is `scripts/f1-banned-words.regex` (committed to this repo). All three users
 (this hook, DevOps CI, Tech Writer README/landing CI) read from that file.
 
 Targets (per spec §10 + the regex file's own header):
