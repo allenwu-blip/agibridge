@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Reduce-motion: respect user preference for status spinner pulse + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus ring is a single token: 2px ring + 2px offset, indigo-500. */
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgb(255 255 255),
+    0 0 0 4px rgb(99 102 241);
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(button, [role="button"], a, input, select, textarea):focus-visible {
+    box-shadow:
+      0 0 0 2px rgb(10 10 10),
+      0 0 0 4px rgb(129 140 248);
+  }
+}

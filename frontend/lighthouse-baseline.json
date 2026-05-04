@@ -1,0 +1,29 @@
+{
+  "_meta": {
+    "captured_at": "2026-05-04T22:29:00Z",
+    "tool": "lighthouse 13.2.0",
+    "url": "http://127.0.0.1:7860/",
+    "agibridge_git_sha_at_build": "1cff803c7b0e8182338d32024dc58135ae906688",
+    "embodied_data_version": "0.3.1",
+    "command": "bunx lighthouse http://127.0.0.1:7860/ --output=json --chrome-flags='--headless --no-sandbox' --only-categories=performance,accessibility",
+    "note": "Localhost run. HF Space cold-start adds ~60-90s per spec §9.3 — first-paint there is dominated by container boot, not bundle size. Bundle is 52.55 KB gzipped JS + 3.64 KB gzipped CSS."
+  },
+  "scores": {
+    "performance": 98,
+    "accessibility": 100
+  },
+  "audits": {
+    "first-contentful-paint": "1.8 s",
+    "largest-contentful-paint": "2.2 s",
+    "total-blocking-time": "0 ms",
+    "cumulative-layout-shift": "0",
+    "interactive": "2.2 s",
+    "speed-index": "1.8 s"
+  },
+  "dod_check": {
+    "performance_threshold": 90,
+    "accessibility_threshold": 95,
+    "performance_pass": true,
+    "accessibility_pass": true
+  }
+}

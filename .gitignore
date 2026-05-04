@@ -17,3 +17,13 @@ build/
 # Local-only artifacts
 /tmp_test_runs/
 *.local.toml
+
+# Frontend (Vite + Bun)
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+# `vite build` writes the SPA bundle into app/static/ — that's the artifact
+# FastAPI serves from GET /. Treat as a build artifact and let DevOps run
+# `cd frontend && bun install && bun run build` in CI before docker build.
+app/static/

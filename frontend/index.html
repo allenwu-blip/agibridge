@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      F-1 hobby framing: no third-party fonts, no analytics, no tracking pixels.
+      Anti-pattern grep enforces this — see frontend/scripts/check-f1.mjs.
+    -->
+    <title>agibridge — convert AgiBot World and LeRobot v3 datasets</title>
+    <meta
+      name="description"
+      content="Hobby project. Drop an AgiBot or LeRobot v3 archive, convert the other way, download the result. Files are kept for 30 minutes, then deleted. No accounts, no storage."
+    />
+  </head>
+  <body class="bg-stone-50 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
