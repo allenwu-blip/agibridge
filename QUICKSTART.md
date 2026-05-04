@@ -33,7 +33,7 @@ If any check fails, the row shows `FAIL` with a one-line detail and the process 
 - Convert real AgiBot Beta data: `embodied-data convert ./agibot_root /tmp/v3_out --from agibot --to lerobot-v3 --verify` (request gated access on the [AgiBotWorld-Beta](https://huggingface.co/datasets/agibot-world/AgiBotWorld-Beta) page first).
 - Inspect a dataset: `embodied-data inspect ./pusht --summary`.
 - Browse the full CLI: `embodied-data --help`.
-- For a no-install browser run, the hosted demo is at `<DOMAIN_TBD>`. Files are kept for 30 minutes, then deleted. No accounts, no storage.
+- For a no-install browser run, the hosted demo is at `agibridge.dev` (DNS pending Vercel + CNAME wiring; not yet live). Files are kept for 30 minutes, then deleted. No accounts, no storage.
 
 ## If something breaks
 

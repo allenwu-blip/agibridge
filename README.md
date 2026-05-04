@@ -25,7 +25,7 @@ For researchers without a local Python setup, agibridge is also a thin web wrapp
 - Pick the conversion direction
 - Download the converted + validated output
 
-**Files are kept for 30 minutes, then deleted. No accounts, no storage.** Demo URL: `<DOMAIN_TBD>` (will resolve once DNS is confirmed).
+**Files are kept for 30 minutes, then deleted. No accounts, no storage.** Demo URL: `agibridge.dev` (will resolve once DNS is confirmed).
 
 The hosted demo runs `embodied-data==0.3.1` unmodified as a subprocess. The `/api/v1/health` endpoint surfaces the lib version so the paper trail is auditable.
 
