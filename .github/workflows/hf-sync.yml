@@ -1,0 +1,97 @@
+# HF Space sync — push agibridge to huggingface.co/spaces/allenwu-blip/agibridge.
+#
+# DoD #2 (brief-devops-automator.md): push to main rebuilds the HF Space.
+# Phase D A3.4: GitHub primary + HF Space mirrors via Action push (NOT direct
+# `git push` from a developer machine — the brief's anti-pattern list).
+#
+# Source-grounded: this workflow uses the manual git-push pattern documented at
+#   https://huggingface.co/docs/hub/spaces-github-actions#alternative-manual-git-push
+# (rather than the `huggingface/hub-sync@v0.1.0` action) because we need to
+# rewrite the repo tree before pushing — specifically, the HF Space repo
+# requires the YAML config block at the top of the ROOT `README.md`, but our
+# canonical config lives at `hf-space/README.md` (Tech Writer's deliverable).
+#
+# The official docs example uses:
+#   git push https://HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/HF_USERNAME/SPACE_NAME main
+# (same page, same section.) We follow that pattern verbatim, with the
+# HF_USERNAME/SPACE_NAME pair = allenwu-blip/agibridge per Phase A-prep.
+
+name: hf-sync
+
+on:
+  push:
+    branches: [main]
+  # workflow_dispatch lets Allen trigger a re-sync if HF rebuild needs nudging.
+  workflow_dispatch:
+
+# Only one HF push at a time; if main lands two commits fast, the second
+# replaces the first rather than racing.
+concurrency:
+  group: hf-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # HF Space's git remote is independent of GitHub's; if we shallow
+          # clone, the HF push fails with "shallow update not allowed"
+          # (official docs note: fetch-depth: 0 is required for the manual
+          # push pattern).
+          fetch-depth: 0
+          lfs: true
+
+      - name: Promote hf-space/README.md to root README for HF push
+        # The HF Space repo expects the YAML config block at the TOP of the
+        # root README.md — see https://huggingface.co/docs/hub/spaces-sdks-docker
+        # ("Setting up Docker Spaces" section). Our GitHub repo's root
+        # README.md is the GitHub-facing landing copy (Tech Writer brief);
+        # `hf-space/README.md` carries the canonical config block.
+        #
+        # We do this rewrite in a detached commit so the GitHub branch is
+        # untouched. The detached commit is what HF receives.
+        run: |
+          set -euo pipefail
+          git config user.email "noreply@github.com"
+          git config user.name "agibridge HF sync bot"
+          # Sanity: the canonical file must exist and have the YAML front-matter.
+          test -f hf-space/README.md
+          head -1 hf-space/README.md | grep -qE '^---$'
+          # Replace root README with the HF-canonical version.
+          cp hf-space/README.md README.md
+          # Stage + commit only the README replacement on top of HEAD.
+          git add README.md
+          git commit -m "hf-sync: promote hf-space/README.md to root for HF Space rebuild" || true
+
+      - name: Push to HuggingFace Space
+        # Per HF docs section "Alternative: manual git push" — the URL format
+        # is https://USER:TOKEN@huggingface.co/spaces/USER/SPACE.
+        # HF_TOKEN secret is provisioned by Allen per Phase A-prep.
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "ERROR: HF_TOKEN secret is not set on this repo." >&2
+            echo "Phase A-prep should have wired this; check Settings → Secrets." >&2
+            exit 1
+          fi
+          # `--force` because the HF mirror's history is owned by this workflow;
+          # if anyone direct-pushes to HF (anti-pattern per brief), we overwrite.
+          git push --force \
+            "https://allenwu-blip:${HF_TOKEN}@huggingface.co/spaces/allenwu-blip/agibridge" \
+            HEAD:main
+
+      - name: Note HF rebuild trigger
+        # HF Space rebuild fires automatically on git push; the build log is
+        # visible at https://huggingface.co/spaces/allenwu-blip/agibridge?logs=build
+        # (HF docs: "Spaces are automatically rebuilt on every push").
+        run: |
+          echo "Pushed to HF Space allenwu-blip/agibridge."
+          echo "Rebuild logs: https://huggingface.co/spaces/allenwu-blip/agibridge?logs=build"

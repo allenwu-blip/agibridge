@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//": [
+    "Source-grounded:",
+    "  - https://vercel.com/docs/project-configuration/git-configuration#git.deploymentenabled",
+    "    (minimatch syntax; 'any unspecified branch is set to true', so we",
+    "     blanket-disable with '*': false then re-enable 'main': true).",
+    "  - https://vercel.com/docs/git/vercel-for-github#a-deployment-for-each-push",
+    "    (default behaviour deploys every push including PR previews — this",
+    "     config is what disables preview-per-branch per the brief's hard",
+    "     constraint 'No Vercel preview-per-branch deployments').",
+    "Vercel project's Root Directory should be set to 'landing/' in the",
+    "dashboard — see docs/runbook-vercel-setup.md."
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "main": true
+    }
+  },
+  "github": {
+    "silent": true,
+    "autoJobCancelation": true
+  }
+}
