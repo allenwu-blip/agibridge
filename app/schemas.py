@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +41,10 @@ class State(str, Enum):
 class UploadAccepted(BaseModel):
     """Response 202 from POST /api/v1/upload. See spec §2.1."""
 
-    session_id: str = Field(..., description="Server-issued ULID. Not secret enough to be unguessable; do not treat as auth.")
+    session_id: str = Field(
+        ...,
+        description="Server-issued ULID. Not secret enough to be unguessable; do not treat as auth.",
+    )
     status_url: str
     expires_at: datetime
     note: str = (

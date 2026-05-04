@@ -108,7 +108,7 @@ class SubprocessRunner:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=SUBPROCESS_TIMEOUT_S
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timed_out = True
             stdout_bytes, stderr_bytes = await self._terminate_with_grace(proc)
 
@@ -133,9 +133,7 @@ class SubprocessRunner:
             timed_out=timed_out,
         )
 
-    async def _terminate_with_grace(
-        self, proc: asyncio.subprocess.Process
-    ) -> tuple[bytes, bytes]:
+    async def _terminate_with_grace(self, proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
         """Send SIGTERM to the process group; wait SIGTERM_GRACE_S; SIGKILL.
 
         Per spec §4 step 5 + §5 conversion_timeout. Returns whatever
@@ -153,14 +151,14 @@ class SubprocessRunner:
                 proc.communicate(), timeout=SIGTERM_GRACE_S
             )
             return stdout_bytes, stderr_bytes
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         if pgid is not None:
             _killpg_quietly(pgid, signal.SIGKILL)
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=2)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             stdout_bytes, stderr_bytes = b"", b""
         return stdout_bytes, stderr_bytes
 
@@ -283,9 +281,7 @@ def map_outcome_to_state(outcome: RunOutcome) -> tuple[State, str | None, str | 
     if rc == 1 and last.get("result") == "FAIL":
         # Compose detail list from `_report.py:68` results array.
         fail_names = [
-            r.get("name", "?")
-            for r in (last.get("results") or [])
-            if r.get("status") == "FAIL"
+            r.get("name", "?") for r in (last.get("results") or []) if r.get("status") == "FAIL"
         ]
         msg = (
             "Conversion finished but the 5-check validator flagged the output. "

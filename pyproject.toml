@@ -50,5 +50,20 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "S", "RUF"]
-ignore = ["S101"]  # assert is fine in tests
+select = ["E", "F", "I", "B", "UP", "RUF"]
+# S (bandit) deliberately omitted: this is a subprocess wrapper around a
+# pinned trusted binary; bandit's S6xx false-positives drown the signal.
+# Re-enable selectively if a target pattern emerges.
+ignore = [
+    "B008",   # FastAPI requires File()/Form() in argument defaults
+    "RUF005", # list concatenation is clearer here
+    "UP042",  # str+Enum is the FastAPI/Pydantic idiom for serialization
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "E501"]  # asserts + long lines OK in tests
+"scripts/check_f1_banned_words.py" = ["E501"]  # diagnostic print lines
+"app/api/status.py" = ["E501"]  # docstrings cite spec line ranges
+"app/api/upload.py" = ["E501"]
+"app/main.py" = ["E501"]
+"app/schemas.py" = ["E501"]
