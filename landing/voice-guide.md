@@ -19,7 +19,7 @@ agibridge is a hobby project from one researcher to other researchers. The reade
 | `please contact us` | Same — wrong register, wrong infrastructure. |
 | `we apologize for the inconvenience` | Customer-service template. Don't. |
 
-(See `_workspace/f1-banned-words.regex` for the F-1 hobby-framing list — that's separate, broader, and CI-enforced.)
+(See `scripts/f1-banned-words.regex` for the F-1 hobby-framing list — that's separate, broader, and CI-enforced.)
 
 ### Required pattern phrases
 

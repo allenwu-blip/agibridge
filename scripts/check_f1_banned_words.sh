@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI grep for F-1 hobby-framing banned words.
-# Sources the canonical regex from _workspace/f1-banned-words.regex (C4 — single
+# Sources the canonical regex from scripts/f1-banned-words.regex (C4 — single
 # source of truth shared with backend pre-commit hook + DevOps CI workflow).
 #
 # Exit 0 = clean. Exit 1 = at least one banned word found (build fails).
@@ -13,7 +13,7 @@
 set -uo pipefail
 
 # Default to the canonical workspace path; override with REGEX_PATH for CI.
-REGEX_PATH="${REGEX_PATH:-../_workspace/f1-banned-words.regex}"
+REGEX_PATH="${REGEX_PATH:-../scripts/f1-banned-words.regex}"
 
 if [ ! -f "$REGEX_PATH" ]; then
   echo "ERROR: canonical F-1 regex not found at $REGEX_PATH" >&2

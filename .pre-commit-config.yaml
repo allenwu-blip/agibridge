@@ -1,5 +1,5 @@
 # Pre-commit hooks for agibridge.
-# F-1 banned-word check sources `_workspace/f1-banned-words.regex` (C4).
+# F-1 banned-word check sources `scripts/f1-banned-words.regex` (C4).
 repos:
   - repo: local
     hooks:
