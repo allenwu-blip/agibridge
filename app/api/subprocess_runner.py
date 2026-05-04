@@ -26,6 +26,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -84,8 +85,14 @@ class SubprocessRunner:
         stderr for failure diagnostics."""
         cmd = self._build_cmd(sess)
         # Spawn under a new process group so we can killpg() the whole tree
-        # (spec §7 HP-2). `process_group=0` requires Python 3.11+ — see
+        # (spec §7 HP-2). `process_group=0` is supported by stdlib asyncio
+        # in Python 3.11+ — see
         # https://docs.python.org/3.12/library/asyncio-subprocess.html#asyncio.create_subprocess_exec
+        # — but uvloop (uvicorn[standard]'s default loop on Linux) rejects
+        # the kwarg with TypeError. Fall back without process_group on
+        # TypeError/ValueError. Per spec §7 HP-2 honest fallback: orphan
+        # subprocess survives until HF container reaper fires; blast radius
+        # bounded by /tmp wipe on container restart.
         kwargs: dict[str, Any] = {
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
@@ -94,7 +101,12 @@ class SubprocessRunner:
         if platform.system() != "Windows":
             kwargs["process_group"] = 0
 
-        proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+        except (TypeError, ValueError):
+            # uvloop does not accept process_group; retry without it.
+            kwargs.pop("process_group", None)
+            proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
 
         async with self._lock:
             self._live_proc = proc
@@ -179,9 +191,11 @@ class SubprocessRunner:
             "--verify",  # cli.py:136-142
         ]
         # `embodied-data` shim isn't on PATH in some test envs; fall back to
-        # `python -m embodied_data.cli`.
+        # `<sys.executable> -m embodied_data.cli`. Use `sys.executable` rather
+        # than literal `python` because macOS dev shells often have only
+        # `python3` (no bare `python`); CI / venv environments may also differ.
         if not shutil.which("embodied-data"):
-            base = ["python", "-m", "embodied_data.cli"] + base[1:]
+            base = [sys.executable, "-m", "embodied_data.cli"] + base[1:]
 
         # prlimit is Linux-only. Best-effort guard per spec §6 HP-1.
         if platform.system() == "Linux" and shutil.which("prlimit"):
