@@ -26,7 +26,7 @@ OpenAPI UI at `http://localhost:7860/docs`.
 uv run pre-commit install
 ```
 
-The F-1 banned-word check sources `_workspace/f1-banned-words.regex` (single
+The F-1 banned-word check sources `scripts/f1-banned-words.regex` (single
 source of truth). Inline `# noqa: f1` exempts a single line where a token is
 technically necessary.
 

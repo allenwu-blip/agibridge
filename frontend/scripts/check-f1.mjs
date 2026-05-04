@@ -2,7 +2,7 @@
 /**
  * F-1 banned-word + anti-pattern grep on the SPA build output (app/static/**).
  *
- * Sources the canonical regex from _workspace/f1-banned-words.regex (C4).
+ * Sources the canonical regex from scripts/f1-banned-words.regex (C4).
  * Refusal to fall back: if the canonical regex file is missing the script
  * exits 2 — we never invent the list inline.
  *
