@@ -17,3 +17,4 @@ build/
 # Local-only artifacts
 /tmp_test_runs/
 *.local.toml
+_workspace/
