@@ -27,3 +27,4 @@ frontend/tsconfig.tsbuildinfo
 # FastAPI serves from GET /. Treat as a build artifact and let DevOps run
 # `cd frontend && bun install && bun run build` in CI before docker build.
 app/static/
+_workspace/
