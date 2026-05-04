@@ -1,4 +1,4 @@
-# HF Space sync — push agibridge to huggingface.co/spaces/allenwu-blip/agibridge.
+# HF Space sync — push agibridge to huggingface.co/spaces/allenwu06/agibridge.
 #
 # DoD #2 (brief-devops-automator.md): push to main rebuilds the HF Space.
 # Phase D A3.4: GitHub primary + HF Space mirrors via Action push (NOT direct
@@ -14,7 +14,7 @@
 # The official docs example uses:
 #   git push https://HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/HF_USERNAME/SPACE_NAME main
 # (same page, same section.) We follow that pattern verbatim, with the
-# HF_USERNAME/SPACE_NAME pair = allenwu-blip/agibridge per Phase A-prep.
+# HF_USERNAME/SPACE_NAME pair = allenwu06/agibridge per Phase A-prep.
 
 name: hf-sync
 
@@ -85,13 +85,13 @@ jobs:
           # `--force` because the HF mirror's history is owned by this workflow;
           # if anyone direct-pushes to HF (anti-pattern per brief), we overwrite.
           git push --force \
-            "https://allenwu-blip:${HF_TOKEN}@huggingface.co/spaces/allenwu-blip/agibridge" \
+            "https://allenwu06:${HF_TOKEN}@huggingface.co/spaces/allenwu06/agibridge" \
             HEAD:main
 
       - name: Note HF rebuild trigger
         # HF Space rebuild fires automatically on git push; the build log is
-        # visible at https://huggingface.co/spaces/allenwu-blip/agibridge?logs=build
+        # visible at https://huggingface.co/spaces/allenwu06/agibridge?logs=build
         # (HF docs: "Spaces are automatically rebuilt on every push").
         run: |
-          echo "Pushed to HF Space allenwu-blip/agibridge."
-          echo "Rebuild logs: https://huggingface.co/spaces/allenwu-blip/agibridge?logs=build"
+          echo "Pushed to HF Space allenwu06/agibridge."
+          echo "Rebuild logs: https://huggingface.co/spaces/allenwu06/agibridge?logs=build"
