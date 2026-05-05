@@ -57,7 +57,7 @@ export function UploadForm({
     }
     const f = list[0]!;
     // Accept .zip and .tar.gz only; matches backend magic-byte check at
-    // app/api/upload.py:34-35 + 196-204.
+    // app/api/upload.py:34-35 + 202-210 (_detect_archive_kind).
     const name = f.name.toLowerCase();
     if (!name.endsWith(".zip") && !name.endsWith(".tar.gz") && !name.endsWith(".tgz")) {
       setValidationError("Only .zip and .tar.gz archives are accepted here.");

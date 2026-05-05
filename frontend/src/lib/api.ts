@@ -59,7 +59,7 @@ async function fetchJson<T>(input: string, init: RequestInit, timeoutMs = 10_000
  *   - max_episodes (int | None)
  *
  * Status codes:
- *   - 202 → UploadAccepted (app/api/upload.py:151-162)
+ *   - 202 → UploadAccepted (app/api/upload.py:159-170, JSONResponse body)
  *   - 400 invalid_format_pair (lines 73-80)
  *   - 413 archive_too_large (lines 102-110, 132-139)
  *   - 415 unsupported_archive_type | mime_spoofed (lines 117-125, 140-142)

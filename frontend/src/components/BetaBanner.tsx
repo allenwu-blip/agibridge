@@ -5,16 +5,19 @@
  * `from_format=agibot`. The body itself is ALL one paragraph copy/paste from
  * spec — no paraphrasing.
  *
- * Render strategy: backticks (`) become inline <code> spans for readability,
- * but the textual content is the same string. RC will diff text, not markup.
+ * Render strategy (HP-2 fix): backticks (`) become inline <code> spans;
+ * **bold** segments become <strong> spans. Spec §5 line 342 uses both bold
+ * and inline code; previous implementation stripped bold silently. Now both
+ * are rendered. RC will diff the underlying string text against the spec.
  */
 
 import { BETA_BANNER_BODY } from "../lib/copy";
 
-/** Render `\`text\`` segments as <code> spans, leaving the rest as plain text. */
-function renderInlineCode(text: string): React.ReactNode[] {
+/** Render `\`code\`` and `**bold**` segments inline; leaving the rest as plain text. */
+function renderInlineMarkup(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  const regex = /`([^`]+)`/g;
+  // Match either **bold** or `code`; bold is greedy enough to cover phrases.
+  const regex = /(\*\*([^*]+?)\*\*)|(`([^`]+)`)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
@@ -22,14 +25,24 @@ function renderInlineCode(text: string): React.ReactNode[] {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
-    parts.push(
-      <code
-        key={`c${key++}`}
-        className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[0.85em] text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
-      >
-        {match[1]}
-      </code>,
-    );
+    if (match[1]) {
+      // **bold** match — match[2] is inner content
+      parts.push(
+        <strong key={`b${key++}`} className="font-semibold">
+          {match[2]}
+        </strong>,
+      );
+    } else {
+      // `code` match — match[4] is inner content
+      parts.push(
+        <code
+          key={`c${key++}`}
+          className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[0.85em] text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+        >
+          {match[4]}
+        </code>,
+      );
+    }
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < text.length) {
@@ -50,7 +63,7 @@ export function BetaBanner({ visible }: Props) {
       aria-label="AgiBot Beta coverage notice"
       className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
     >
-      <p>{renderInlineCode(BETA_BANNER_BODY)}</p>
+      <p>{renderInlineMarkup(BETA_BANNER_BODY)}</p>
     </aside>
   );
 }

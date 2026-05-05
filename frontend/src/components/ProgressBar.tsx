@@ -11,7 +11,7 @@
  *   3. Status payload includes estimated_progress_pct as int 0..99 when state
  *      in {running, validating}, else null.
  *
- * Backend implementation: app/api/status.py:59-74 (_estimated_progress_pct
+ * Backend implementation: app/api/status.py:63-79 (_estimated_progress_pct
  * clamps at 99 and returns None unless state is running/validating).
  *
  * The component DOUBLE-CHECKS the clamp client-side: even if a malformed

@@ -7,7 +7,7 @@
  *   line 309" but the live v2.2 spec has the verbatim banner at line 342 of
  *   the same §5; the brief points at an outdated line number, the body itself
  *   is unchanged. RC will diff the body, not the line ref.
- * - EPHEMERAL_NOTICE — spec §10 check #2 + app/api/upload.py:158-160
+ * - EPHEMERAL_NOTICE — spec §10 check #2 + app/api/upload.py:165-167 (note string in 202 JSONResponse)
  *   ("Files are kept for 30 minutes, then deleted. No accounts, no storage.").
  *   DoD #3: must appear on every page-level surface.
  * - TOAST_* — agibridge/landing/voice-guide.md Surface 2. DoD #9 / C5
@@ -20,13 +20,20 @@
  * Anti-pattern grep also ENFORCED: no analytics SDKs.
  */
 
-/** Beta-coverage banner. Verbatim from spec §5 line 342 (post v2.1). */
+/**
+ * Beta-coverage banner. Verbatim from spec §5 line 342 (post v2.1).
+ *
+ * HP-2 fix: spec uses `**bold**` markdown around "AgiBot Beta is partially
+ * supported." and "silently dropped without error". Restoring `**` markers
+ * here so BetaBanner.tsx's renderInlineMarkup() can emit <strong> spans.
+ * Body text (sans markup) remains byte-for-byte identical to spec §5 line 342.
+ */
 export const BETA_BANNER_BODY =
-  "AgiBot Beta is partially supported. This Space ships with `embodied-data==0.3.1`, which converts the joint/effector/head/waist subgroups and the `head_color` camera. Three Beta features are silently dropped without error (per `docs/schema/beta.md:105, 148-155, 184-185, 222-228`): sparse-action `*/index` masks, `state/end/*` end-pose wrench data, and non-`head_color` cameras (fisheye / hand / back). Conversion completes; the dropped fields simply don't appear in the LeRobot v3 output. Separately, schema-shape mismatches in *captured* fields (e.g. unexpected dtype on `state/joint/position`) surface as `converter_rejected_input` with the lib's pass-through diagnostic. Please file the stderr tail on the embodied-data GitHub for either case.";
+  "**AgiBot Beta is partially supported.** This Space ships with `embodied-data==0.3.1`, which converts the joint/effector/head/waist subgroups and the `head_color` camera. Three Beta features are **silently dropped without error** (per `docs/schema/beta.md:105, 148-155, 184-185, 222-228`): sparse-action `*/index` masks, `state/end/*` end-pose wrench data, and non-`head_color` cameras (fisheye / hand / back). Conversion completes; the dropped fields simply don't appear in the LeRobot v3 output. Separately, schema-shape mismatches in *captured* fields (e.g. unexpected dtype on `state/joint/position`) surface as `converter_rejected_input` with the lib's pass-through diagnostic. Please file the stderr tail on the embodied-data GitHub for either case.";
 
 /**
  * Ephemeral notice — spec §10 check #2 verbatim.
- * Backend repeats this in app/api/upload.py:158-160 and app/main.py:51 — so
+ * Backend repeats this in app/api/upload.py:165-167 and app/main.py:51 — so
  * the wording is fixed across both surfaces.
  */
 export const EPHEMERAL_NOTICE =
