@@ -18,14 +18,22 @@
 
 name: hf-sync
 
+# HP-1: gate HF push on CI success. Previously this fired on `push: main` in
+# parallel with `ci`, so a red CI merge would still mirror to HF within seconds.
+# `workflow_run` waits for the named workflow to complete and exposes its
+# conclusion; we only proceed on `success`.
+#   https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#workflow_run
 on:
-  push:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
     branches: [main]
-  # workflow_dispatch lets Allen trigger a re-sync if HF rebuild needs nudging.
+  # workflow_dispatch lets Allen trigger a re-sync if HF rebuild needs nudging
+  # (e.g. CI was green but HF rebuild silently failed).
   workflow_dispatch:
 
-# Only one HF push at a time; if main lands two commits fast, the second
-# replaces the first rather than racing.
+# Only one HF push at a time. cancel-in-progress: false means the second
+# push queues behind the first; in-flight HF push is not killed.
 concurrency:
   group: hf-sync
   cancel-in-progress: false
@@ -35,6 +43,10 @@ permissions:
 
 jobs:
   sync:
+    # Skip when the upstream `ci` run failed/cancelled. `workflow_dispatch`
+    # invocations don't carry `event.workflow_run`, so the conditional defaults
+    # to allowing the manual trigger.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history)

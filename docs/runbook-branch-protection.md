@@ -12,6 +12,7 @@ returns 404.
   - `test` (the `test` job)
   - `f1-banned-words` (the `f1-banned-words` job — both .py + .sh runs)
   - `uv-lock-check` (the `uv-lock-check` job)
+  - `docker-build` (the `docker build + smoke test` job — DoD #5)
 - `strict: true` (branches must be up to date before merging — solo guard
   against "merging stale main")
 - `enforce_admins: true` (the brief's "solo-founder guard" intent)
@@ -32,6 +33,12 @@ returns 404.
 # 1. Apply the protection rules (status checks + force-push lock).
 #    The contexts list MUST match the `name:` field of each job in ci.yml.
 #    GitHub identifies status checks by their job name, not the workflow file.
+#
+#    Note on `required_pull_request_reviews=null` and `restrictions=null`:
+#    the API schema marks both as "required (object or null)" — passing them
+#    as empty strings via `gh api -F` shorthand serializes to `""` and the
+#    PUT request rejects with a 422 schema error. Literal `null` clears the
+#    field correctly. See the PUT body schema linked above.
 gh api -X PUT \
   /repos/allenwu-blip/agibridge/branches/main/protection \
   -H "Accept: application/vnd.github+json" \
@@ -40,9 +47,10 @@ gh api -X PUT \
   -F 'required_status_checks[contexts][]=pytest' \
   -F 'required_status_checks[contexts][]=F-1 banned-word grep (BOTH scripts — see W2 note)' \
   -F 'required_status_checks[contexts][]=uv lock --check (lockfile freshness)' \
+  -F 'required_status_checks[contexts][]=docker build + smoke test' \
   -F enforce_admins=true \
-  -F required_pull_request_reviews= \
-  -F restrictions= \
+  -F required_pull_request_reviews=null \
+  -F restrictions=null \
   -F allow_force_pushes=false \
   -F allow_deletions=false \
   -F required_linear_history=false
@@ -74,7 +82,8 @@ gh api /repos/allenwu-blip/agibridge/branches/main/protection \
       "ruff check (lint)",
       "pytest",
       "F-1 banned-word grep (BOTH scripts — see W2 note)",
-      "uv lock --check (lockfile freshness)"
+      "uv lock --check (lockfile freshness)",
+      "docker build + smoke test"
     ],
     "checks": [...]
   },

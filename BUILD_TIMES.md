@@ -31,7 +31,7 @@ with real numbers from the first successful CI run.
 | ------------------------------------------------------ | --------------- | -------- |
 | `docker build` cold (CI runner, ubuntu-latest)         | ~3 min          | PENDING  |
 | `docker build` warm (app code only)                    | ~20 s           | PENDING  |
-| HF Space cold start (first hit after >48 h idle)       | ~60–90 s        | PENDING  |
+| HF Space cold start (first hit after >48 h idle, [HF sleep time docs](https://huggingface.co/docs/hub/spaces-sdks-docker#sleep-time)) | ~60–90 s | PENDING |
 | uvicorn-ready inside container (CMD → 200 on /health)  | ~2 s            | PENDING  |
 | First real Beta task convert+validate (47 eps, ~600 MB)| ~3–4 min        | PENDING  |
 
