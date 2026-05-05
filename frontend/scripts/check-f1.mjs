@@ -25,7 +25,7 @@ const repoRoot = resolve(import.meta.dirname, "..", "..");
 const staticRoot = join(repoRoot, "app", "static");
 const canonicalRegex = process.env.REGEX_PATH
   ? resolve(process.env.REGEX_PATH)
-  : resolve(repoRoot, "..", "_workspace", "f1-banned-words.regex");
+  : resolve(repoRoot, "scripts", "f1-banned-words.regex");
 
 function loadCanonicalPatterns() {
   let text;

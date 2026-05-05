@@ -31,7 +31,7 @@ describe("BetaBanner", () => {
   });
 
   it("BETA_BANNER_BODY constant matches the spec §5 verbatim opening sentence", () => {
-    expect(BETA_BANNER_BODY).toMatch(/^AgiBot Beta is partially supported\./);
+    expect(BETA_BANNER_BODY).toMatch(/^\*\*AgiBot Beta is partially supported\.\*\*/);
     // Closing sentence is also verbatim.
     expect(BETA_BANNER_BODY).toMatch(
       /Please file the stderr tail on the embodied-data GitHub for either case\.$/,
