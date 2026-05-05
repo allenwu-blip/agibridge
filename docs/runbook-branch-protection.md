@@ -39,7 +39,7 @@ gh api -X PUT \
   -F 'required_status_checks[contexts][]=ruff check (lint)' \
   -F 'required_status_checks[contexts][]=pytest' \
   -F 'required_status_checks[contexts][]=F-1 banned-word grep (BOTH scripts — see W2 note)' \
-  -F 'required_status_checks[contexts][]=uv lock --check (lockfile freshness)' \
+  -F 'required_status_checks[contexts][]=uv lock --locked (lockfile freshness)' \
   -F enforce_admins=true \
   -F required_pull_request_reviews= \
   -F restrictions= \
@@ -74,7 +74,7 @@ gh api /repos/allenwu-blip/agibridge/branches/main/protection \
       "ruff check (lint)",
       "pytest",
       "F-1 banned-word grep (BOTH scripts — see W2 note)",
-      "uv lock --check (lockfile freshness)"
+      "uv lock --locked (lockfile freshness)"
     ],
     "checks": [...]
   },
