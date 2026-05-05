@@ -2,7 +2,7 @@
 #
 # DoD #1 (brief-devops-automator.md): lint (ruff check) + test (pytest) + F-1
 # banned-word grep (BOTH scripts per the W2 propagation note in the dispatch
-# brief — see comment on the "f1-banned-words" job below) + uv lock --check.
+# brief — see comment on the "f1-banned-words" job below) + uv lock --locked.
 #
 # Scope IN per Phase D A3.3: Python 3.12 only (matches Dockerfile per spec §9.1).
 # Scope OUT: no Dependabot (anti-pattern in brief), no APM, no analytics.
@@ -86,7 +86,7 @@ jobs:
         run: uv run pytest -q
 
   uv-lock-check:
-    name: uv lock --check (lockfile freshness)
+    name: uv lock --locked (lockfile freshness)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,9 +94,9 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.4.30"
-      # `uv lock --check` exits non-zero if pyproject.toml has been edited
+      # `uv lock --locked` exits non-zero if pyproject.toml has been edited
       # without re-locking. This is the spec §9.1 HP-7 enforcement.
-      - run: uv lock --check
+      - run: uv lock --locked
 
   f1-banned-words:
     name: F-1 banned-word grep (BOTH scripts — see W2 note)
