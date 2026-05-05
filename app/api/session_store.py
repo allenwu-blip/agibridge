@@ -40,9 +40,7 @@ class Session:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    expires_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC) + PURGE_TIMEOUT
-    )
+    expires_at: datetime = field(default_factory=lambda: datetime.now(UTC) + PURGE_TIMEOUT)
     error_code: str | None = None
     error_message: str | None = None
     error_suggestion: str | None = None

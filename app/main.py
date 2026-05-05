@@ -29,7 +29,7 @@ _reaper = PurgeReaper(_session_store)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # noqa: ARG001 — FastAPI signature
+async def lifespan(app: FastAPI):
     """Lifespan: start PurgeReaper at startup; on shutdown SIGKILL any live
     subprocess process group per spec §4 step 5 + §7 HP-2."""
     # Lazy version log — emit warning once at startup if importlib.metadata
@@ -84,7 +84,9 @@ app.include_router(version.router, prefix="/api/v1")
 # Static SPA. The frontend agent will populate app/static/ with the bundle.
 _STATIC_DIR = Path(__file__).parent / "static"
 if _STATIC_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets", check_dir=False), name="assets")
+    app.mount(
+        "/assets", StaticFiles(directory=_STATIC_DIR / "assets", check_dir=False), name="assets"
+    )
 
 
 @app.get("/", include_in_schema=False, response_model=None)

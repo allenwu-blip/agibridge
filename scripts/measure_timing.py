@@ -54,10 +54,14 @@ def main() -> int:
     bucket = _bucket_for(ep_count)
 
     with tempfile.TemporaryDirectory() as dst:
+        # HP-7: use sys.executable rather than literal "python" because macOS
+        # dev shells often have only `python3` (no bare `python`); CI / venv
+        # environments may also differ. Same reasoning as
+        # subprocess_runner.py:_build_cmd.
         cmd = [
-            "embodied-data" if shutil.which("embodied-data") else "python",
+            "embodied-data" if shutil.which("embodied-data") else sys.executable,
         ]
-        if cmd[0] == "python":
+        if cmd[0] == sys.executable:
             cmd.extend(["-m", "embodied_data.cli"])
         cmd.extend(
             [

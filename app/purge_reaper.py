@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.api.session_store import HARD_PURGE_TIMEOUT, Session
@@ -24,7 +24,7 @@ logger = logging.getLogger("agibridge.purge")
 
 
 class PurgeReaper:
-    def __init__(self, store: "SessionStore", interval_s: int = PURGE_INTERVAL_S) -> None:
+    def __init__(self, store: SessionStore, interval_s: int = PURGE_INTERVAL_S) -> None:
         self._store = store
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
@@ -42,7 +42,7 @@ class PurgeReaper:
             self._task.cancel()
             try:
                 await self._task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            except (asyncio.CancelledError, Exception):
                 pass
             self._task = None
 
@@ -51,14 +51,12 @@ class PurgeReaper:
             while not self._stop_event.is_set():
                 try:
                     await self.purge_once()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # Reaper must not die; log and keep ticking.
                     logger.exception("purge tick failed")
                 try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(), timeout=self._interval_s
-                    )
-                except asyncio.TimeoutError:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self._interval_s)
+                except TimeoutError:
                     continue
         except asyncio.CancelledError:
             return

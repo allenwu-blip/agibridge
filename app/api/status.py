@@ -26,7 +26,13 @@ async def get_status(session_id: str) -> StatusResponse:
     if sess is None:
         # Spec §2.2: 404 covers both never-existed and purged. Indistinguishable
         # on purpose so prior session ids don't leak.
-        raise HTTPException(status_code=404, detail={"code": "session_not_found", "message": "We don't know that session. It may have expired."})
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "session_not_found",
+                "message": "We don't know that session. It may have expired.",
+            },
+        )
     return _to_response(sess)
 
 
@@ -40,9 +46,7 @@ def _to_response(sess: Session) -> StatusResponse:
             stderr_tail=sess.stderr_tail,
         )
 
-    download_url = (
-        f"/api/v1/download/{sess.session_id}" if sess.state == State.done else None
-    )
+    download_url = f"/api/v1/download/{sess.session_id}" if sess.state == State.done else None
 
     return StatusResponse(
         session_id=sess.session_id,
