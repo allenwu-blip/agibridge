@@ -5,6 +5,7 @@ needing a real `embodied-data` invocation."""
 
 from __future__ import annotations
 
+import asyncio
 import platform
 import signal
 import sys
@@ -246,3 +247,120 @@ async def test_runner_uses_new_process_group(tmp_path: Path) -> None:
     # in our group, killpg in `shutdown()` would kill us. The fact that this
     # completes with rc=0 and no signal kill is the implicit assertion.
     assert outcome.signal_killed is None
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="POSIX signals only")
+async def test_runner_uvloop_fallback_does_not_killpg_self(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CR-6 regression: when asyncio.create_subprocess_exec rejects
+    `process_group=0` (uvloop on Linux), the runner must fall back to a
+    single-process kill on timeout/shutdown — NOT `os.killpg(parent_pgid, ...)`.
+
+    Without the fix, the child inherits the FastAPI worker's pgid and our
+    later killpg would SIGTERM/SIGKILL uvicorn itself mid-run.
+
+    We simulate uvloop by intercepting `asyncio.create_subprocess_exec`:
+    raise TypeError on the first invocation if `process_group` is in kwargs,
+    then transparently call the real function on retry. We then patch
+    SUBPROCESS_TIMEOUT_S to a tiny value so `_terminate_with_grace` fires,
+    and patch `_killpg_quietly` to record any invocation. Assertion:
+    `_killpg_quietly` is never called; the process is reaped via
+    `proc.terminate()` / `proc.kill()` instead.
+    """
+    from app.api import subprocess_runner as sr
+
+    # Sleeper that ignores SIGTERM so terminate() escalates to kill(); long
+    # enough that wait_for() trips the patched 1 s timeout reliably.
+    sleeper = tmp_path / "sleeper.py"
+    sleeper.write_text(
+        "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)\n"
+    )
+
+    sess = Session(session_id="uvloop-sess", root=tmp_path)
+    sess.in_dir.mkdir(parents=True, exist_ok=True)
+    sess.out_dir.mkdir(parents=True, exist_ok=True)
+    sess.from_format = "agibot"
+    sess.to_format = "lerobot-v3"
+
+    # 1. Intercept create_subprocess_exec to mimic uvloop's TypeError on
+    #    process_group, then succeed on retry.
+    real_exec = asyncio.create_subprocess_exec
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd: str, **kwargs: object) -> asyncio.subprocess.Process:
+        call_count["n"] += 1
+        if call_count["n"] == 1 and "process_group" in kwargs:
+            raise TypeError("uvloop: process_group not supported")
+        kwargs.pop("process_group", None)
+        return await real_exec(*cmd, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    # 2. Spy on _killpg_quietly. Any invocation is the bug we're guarding
+    #    against (it would target the parent worker's pgid).
+    killpg_calls: list[tuple[int, int]] = []
+
+    def spy_killpg(pgid: int, sig: int) -> None:
+        killpg_calls.append((pgid, sig))
+
+    monkeypatch.setattr(sr, "_killpg_quietly", spy_killpg)
+
+    # 3. Shrink timeouts so _terminate_with_grace fires fast. Restore in
+    #    `finally` so other tests aren't affected.
+    sr_orig_timeout = sr.SUBPROCESS_TIMEOUT_S
+    sr_orig_grace = sr.SIGTERM_GRACE_S
+    sr.SUBPROCESS_TIMEOUT_S = 1
+    sr.SIGTERM_GRACE_S = 1
+
+    runner = SubprocessRunner()
+    runner._build_cmd = lambda s: [sys.executable, str(sleeper)]  # type: ignore[method-assign]
+
+    try:
+        outcome = await runner.run(sess)
+    finally:
+        sr.SUBPROCESS_TIMEOUT_S = sr_orig_timeout
+        sr.SIGTERM_GRACE_S = sr_orig_grace
+
+    # Assertions (CR-6 contract):
+    # (a) The fallback retry actually fired — we saw two create_subprocess_exec calls.
+    assert call_count["n"] == 2, f"expected fallback retry, got {call_count['n']} calls"
+    # (b) The runner correctly recorded that no process group was used.
+    assert runner._process_group_used is False
+    # (c) Most importantly: _killpg_quietly was NEVER called. Without the fix,
+    #     _terminate_with_grace would killpg(parent_pgid, SIGTERM) then SIGKILL.
+    assert killpg_calls == [], (
+        f"killpg was invoked despite uvloop fallback — would target parent's pgid: {killpg_calls}"
+    )
+    # (d) The subprocess was nonetheless terminated (rc != None). On POSIX,
+    #     proc.kill() yields returncode = -SIGKILL == -9.
+    assert outcome.timed_out is True
+    assert outcome.returncode is not None
+
+    # (e) shutdown() under the same flag must also avoid killpg. Spawn a fresh
+    #     fake-uvloop run, then call shutdown() and re-check.
+    call_count["n"] = 0
+    killpg_calls.clear()
+    sess2 = Session(session_id="uvloop-shutdown-sess", root=tmp_path)
+    sess2.in_dir.mkdir(parents=True, exist_ok=True)
+    sess2.out_dir.mkdir(parents=True, exist_ok=True)
+    # Long-enough sleeper that we shutdown() before timeout.
+    quick_sleeper = tmp_path / "quick_sleeper.py"
+    quick_sleeper.write_text("import time; time.sleep(30)\n")
+    runner2 = SubprocessRunner()
+    runner2._build_cmd = lambda s: [sys.executable, str(quick_sleeper)]  # type: ignore[method-assign]
+
+    # Drive run() in the background and shutdown() before it completes.
+    sr.SUBPROCESS_TIMEOUT_S = 30  # plenty of head-room
+    run_task = asyncio.create_task(runner2.run(sess2))
+    await asyncio.sleep(0.3)  # let create_subprocess_exec retry path resolve
+    assert runner2._process_group_used is False
+    await runner2.shutdown()
+    sr.SUBPROCESS_TIMEOUT_S = sr_orig_timeout
+    # Wait for the run() coroutine to observe the killed child.
+    try:
+        await asyncio.wait_for(run_task, timeout=5)
+    except TimeoutError:
+        run_task.cancel()
+        raise
+    assert killpg_calls == [], f"shutdown() killpg'd despite uvloop fallback: {killpg_calls}"
