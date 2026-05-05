@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-REGEX_FILE = REPO_ROOT / "_workspace" / "f1-banned-words.regex"
+REGEX_FILE = REPO_ROOT / "scripts" / "f1-banned-words.regex"
 
 
 def load_canonical_regex() -> re.Pattern[str]:
