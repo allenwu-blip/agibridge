@@ -21,7 +21,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from ulid import ULID
 
-from app.api.session_store import PURGE_TIMEOUT, Session, SessionStore
+from app.api.session_store import Session, SessionStore
 from app.api.subprocess_runner import SubprocessRunner, update_session_from_outcome
 from app.api.timing_estimates import estimate_total_seconds
 from app.schemas import State, UploadAccepted
@@ -42,6 +42,7 @@ router = APIRouter()
 
 _session_store: SessionStore | None = None
 _runner: SubprocessRunner | None = None
+_live_bg_task: asyncio.Task | None = None  # avoid GC of background task per RUF006
 
 
 def set_state(store: SessionStore, runner: SubprocessRunner) -> None:
@@ -139,14 +140,19 @@ async def upload(
         ) from exc
     except _UnsafeArchive as exc:
         await _cleanup(sess)
-        raise _err(415, "mime_spoofed", str(exc), "Re-export as a plain .zip and try again.") from exc
+        raise _err(
+            415, "mime_spoofed", str(exc), "Re-export as a plain .zip and try again."
+        ) from exc
 
     # 7. Hand off to background task. Return 202 immediately.
     sess.estimated_total_s = estimate_total_seconds(
         from_format=from_format, to_format=to_format, in_dir=extract_dir
     )
     sess.write_status()
-    asyncio.create_task(_run_background(sess, max_episodes))
+    # Reference held in module-global to avoid GC. Per spec §3 single-flight,
+    # there is at most one live task; we don't need a per-session set.
+    global _live_bg_task
+    _live_bg_task = asyncio.create_task(_run_background(sess, max_episodes))
 
     return JSONResponse(
         status_code=202,
@@ -223,7 +229,10 @@ def _safe_extract(archive: Path, kind: str, dest: Path) -> None:
             for zi in zf.infolist():
                 # Path traversal containment (spec §7 'Path traversal in upload zip').
                 target = (dest / zi.filename).resolve()
-                if not str(target).startswith(str(dest_resolved) + os.sep) and target != dest_resolved:
+                if (
+                    not str(target).startswith(str(dest_resolved) + os.sep)
+                    and target != dest_resolved
+                ):
                     raise _UnsafeArchive(
                         "archive contains entry that escapes the extraction directory"
                     )

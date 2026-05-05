@@ -134,13 +134,21 @@ def main() -> int:
         try:
             tree = ast.parse(main_py.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "FastAPI":
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "FastAPI"
+                ):
                     for kw in node.keywords:
-                        if kw.arg in ("title", "description") and isinstance(kw.value, ast.Constant):
+                        if kw.arg in ("title", "description") and isinstance(
+                            kw.value, ast.Constant
+                        ):
                             s = kw.value.value
                             if isinstance(s, str):
                                 for m in pat.finditer(s):
-                                    all_hits.append((main_py, kw.value.lineno, m.group(0), s.strip()[:120]))
+                                    all_hits.append(
+                                        (main_py, kw.value.lineno, m.group(0), s.strip()[:120])
+                                    )
         except (OSError, SyntaxError):
             pass
 
