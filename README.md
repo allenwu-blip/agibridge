@@ -25,7 +25,7 @@ For researchers without a local Python setup, agibridge is also a thin web wrapp
 - Pick the conversion direction
 - Download the converted + validated output
 
-**Files are kept for 30 minutes, then deleted. No accounts, no storage.** Demo URL: `agibridge.dev` (will resolve once DNS is confirmed).
+**Files are kept for 30 minutes, then deleted. No accounts, no storage.** Demo URL: `agibridge.dev` (DNS pending Vercel + CNAME wiring; not yet live).
 
 The hosted demo runs `embodied-data==0.3.1` unmodified as a subprocess. The `/api/v1/health` endpoint surfaces the lib version so the paper trail is auditable.
 
@@ -59,8 +59,6 @@ If a hosted-demo session failed and you need someone to look at logs, paste the 
 - Code (library): [github.com/allenwu-blip/embodied-data](https://github.com/allenwu-blip/embodied-data)
 - Code (this wrapper): [github.com/allenwu-blip/agibridge](https://github.com/allenwu-blip/agibridge)
 - PyPI: [pypi.org/project/embodied-data](https://pypi.org/project/embodied-data/)
-- Sponsor: `<GITHUB_SPONSORS_URL>` (TBD)
-- Discord: `<DISCORD_INVITE_URL>` (TBD)
 
 Contributors welcome on either repo. Issues, PRs, and conversion edge cases all valued — open an issue first if the fix is non-trivial so we can sanity-check direction before code.
 
