@@ -1,0 +1,41 @@
+# .dockerignore — keep the build context lean (spec §9.1, image size target ~1.2 GB).
+# The Docker official guidance is "exclude files not relevant to the build"
+# (https://docs.docker.com/build/building/context/#dockerignore-files).
+
+.git
+.github
+.gitignore
+.dockerignore
+
+# Local virtualenvs / caches — never want these in the build context.
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# OS/editor noise.
+.DS_Store
+.idea
+.vscode
+
+# Tests are not shipped in the runtime image (spec §9.1 step 5 only ships app/).
+tests
+scripts/measure_timing.py
+
+# Documentation + landing source live outside the runtime image.
+README.md
+QUICKSTART.md
+LICENSE
+landing
+hf-space
+docs
+_workspace
+BUILD_TIMES.md
+
+# Build artifacts.
+dist
+build
+*.egg-info
