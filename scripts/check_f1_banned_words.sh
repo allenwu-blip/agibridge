@@ -12,8 +12,9 @@
 
 set -uo pipefail
 
-# Default to the canonical workspace path; override with REGEX_PATH for CI.
-REGEX_PATH="${REGEX_PATH:-../scripts/f1-banned-words.regex}"
+# Default to the canonical scripts/ path (relative to repo root, where this
+# script is invoked from per the usage doc above); override with REGEX_PATH for CI.
+REGEX_PATH="${REGEX_PATH:-scripts/f1-banned-words.regex}"
 
 if [ ! -f "$REGEX_PATH" ]; then
   echo "ERROR: canonical F-1 regex not found at $REGEX_PATH" >&2
