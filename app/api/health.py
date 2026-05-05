@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
 from importlib import metadata as _md
 from pathlib import Path
@@ -61,12 +62,14 @@ async def log_version_drift_once() -> None:
         return  # Can't compare; lib not installed in this env (e.g. tests).
 
     cmd = "embodied-data" if shutil.which("embodied-data") else None
-    if cmd is None:
-        cmd = "python"
     try:
         # Run in thread; subprocess.run is sync. cli.py:69-75 is the version source.
-        if cmd == "python":
-            argv = ["python", "-m", "embodied_data.cli", "--version", "--json"]
+        # HP-7: use sys.executable rather than literal "python" because macOS
+        # dev shells often have only `python3` (no bare `python`); CI / venv
+        # environments may also differ. Same reasoning as
+        # subprocess_runner.py:_build_cmd.
+        if cmd is None:
+            argv = [sys.executable, "-m", "embodied_data.cli", "--version", "--json"]
         else:
             argv = [cmd, "--version", "--json"]
         result = await asyncio.to_thread(

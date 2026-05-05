@@ -26,6 +26,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -68,15 +69,37 @@ class SubprocessRunner:
     def __init__(self) -> None:
         self._live_proc: asyncio.subprocess.Process | None = None
         self._live_pgid: int | None = None
+        # HP-2 / CR-6: True iff the live subprocess was actually spawned with
+        # `process_group=0` (i.e. its own pgid). Under uvloop the kwarg is
+        # rejected and dropped on retry, so the child inherits the parent's
+        # pgid; killpg(parent_pgid, ...) would then SIGKILL the FastAPI worker.
+        # Spec §7 HP-2 + §4 step 5 lifespan teardown contract: only killpg
+        # when this flag is True; otherwise fall back to single-process
+        # terminate/kill.
+        self._process_group_used: bool = False
         self._lock = asyncio.Lock()
 
     async def shutdown(self) -> None:
-        """FastAPI lifespan teardown. SIGKILL any live process group."""
+        """FastAPI lifespan teardown.
+
+        Spec §7 HP-2 + §4 step 5: SIGKILL the subprocess group on graceful
+        shutdown so no orphan converter survives. CR-6 gating: only signal
+        the process group when we actually placed the child in its own pgid;
+        under the uvloop fallback the child inherited the parent's pgid and
+        killpg would target the FastAPI worker itself."""
         async with self._lock:
-            if self._live_pgid is not None:
+            if self._process_group_used and self._live_pgid is not None:
                 _killpg_quietly(self._live_pgid, signal.SIGKILL)
+            elif self._live_proc is not None:
+                # Single-process fallback: orphan blast radius bounded by
+                # /tmp wipe on container restart per spec §7 HP-2 honest fallback.
+                try:
+                    self._live_proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
             self._live_proc = None
             self._live_pgid = None
+            self._process_group_used = False
 
     async def run(self, sess: Session) -> RunOutcome:
         """Spawn `embodied-data --json convert ... --verify` in a new process
@@ -84,8 +107,15 @@ class SubprocessRunner:
         stderr for failure diagnostics."""
         cmd = self._build_cmd(sess)
         # Spawn under a new process group so we can killpg() the whole tree
-        # (spec §7 HP-2). `process_group=0` requires Python 3.11+ — see
+        # (spec §7 HP-2). `process_group=0` is supported by stdlib asyncio
+        # in Python 3.11+ — see
         # https://docs.python.org/3.12/library/asyncio-subprocess.html#asyncio.create_subprocess_exec
+        # — but uvloop (uvicorn[standard]'s default loop on Linux) rejects
+        # the kwarg with TypeError. CR-6: when uvloop forces process_group=0
+        # to be dropped, fallback to single-process kill to avoid killing the
+        # parent's pgid (which the child would inherit). Track which path
+        # actually fired in self._process_group_used so _terminate_with_grace
+        # and shutdown gate killpg correctly.
         kwargs: dict[str, Any] = {
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
@@ -94,13 +124,28 @@ class SubprocessRunner:
         if platform.system() != "Windows":
             kwargs["process_group"] = 0
 
-        proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+        process_group_used = False
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+            # First try succeeded with process_group=0 (or it wasn't requested
+            # on Windows, in which case there's no group to manage anyway).
+            process_group_used = "process_group" in kwargs
+        except (TypeError, ValueError):
+            # uvloop does not accept process_group; retry without it. The
+            # child will inherit the parent's pgid — DO NOT killpg later.
+            kwargs.pop("process_group", None)
+            proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
+            process_group_used = False
 
         async with self._lock:
             self._live_proc = proc
-            try:
-                self._live_pgid = os.getpgid(proc.pid) if proc.pid else None
-            except (ProcessLookupError, OSError):
+            self._process_group_used = process_group_used
+            if process_group_used:
+                try:
+                    self._live_pgid = os.getpgid(proc.pid) if proc.pid else None
+                except (ProcessLookupError, OSError):
+                    self._live_pgid = None
+            else:
                 self._live_pgid = None
 
         timed_out = False
@@ -108,13 +153,14 @@ class SubprocessRunner:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=SUBPROCESS_TIMEOUT_S
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             timed_out = True
             stdout_bytes, stderr_bytes = await self._terminate_with_grace(proc)
 
         async with self._lock:
             self._live_proc = None
             self._live_pgid = None
+            self._process_group_used = False
 
         rc = proc.returncode
         signal_killed: int | None = None
@@ -133,34 +179,52 @@ class SubprocessRunner:
             timed_out=timed_out,
         )
 
-    async def _terminate_with_grace(
-        self, proc: asyncio.subprocess.Process
-    ) -> tuple[bytes, bytes]:
-        """Send SIGTERM to the process group; wait SIGTERM_GRACE_S; SIGKILL.
+    async def _terminate_with_grace(self, proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+        """Send SIGTERM, wait SIGTERM_GRACE_S, then SIGKILL.
 
-        Per spec §4 step 5 + §5 conversion_timeout. Returns whatever
-        stdout/stderr was buffered."""
-        try:
-            pgid = os.getpgid(proc.pid) if proc.pid else None
-        except (ProcessLookupError, OSError):
-            pgid = None
-
-        if pgid is not None:
-            _killpg_quietly(pgid, signal.SIGTERM)
+        Per spec §4 step 5 + §5 conversion_timeout. CR-6: when
+        self._process_group_used is True, signal the whole process group via
+        killpg() so converter children (e.g. ffmpeg shelled from av) die with
+        the parent. When False (uvloop fallback), the child inherits the
+        FastAPI worker's pgid; killpg would SIGTERM/SIGKILL uvicorn itself —
+        instead use single-process proc.terminate() / proc.kill(). Returns
+        whatever stdout/stderr was buffered."""
+        if self._process_group_used:
+            try:
+                pgid = os.getpgid(proc.pid) if proc.pid else None
+            except (ProcessLookupError, OSError):
+                pgid = None
+            if pgid is not None:
+                _killpg_quietly(pgid, signal.SIGTERM)
+        else:
+            try:
+                proc.terminate()
+            except (ProcessLookupError, OSError):
+                pass
 
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=SIGTERM_GRACE_S
             )
             return stdout_bytes, stderr_bytes
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
-        if pgid is not None:
-            _killpg_quietly(pgid, signal.SIGKILL)
+        if self._process_group_used:
+            try:
+                pgid = os.getpgid(proc.pid) if proc.pid else None
+            except (ProcessLookupError, OSError):
+                pgid = None
+            if pgid is not None:
+                _killpg_quietly(pgid, signal.SIGKILL)
+        else:
+            try:
+                proc.kill()
+            except (ProcessLookupError, OSError):
+                pass
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=2)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             stdout_bytes, stderr_bytes = b"", b""
         return stdout_bytes, stderr_bytes
 
@@ -181,9 +245,11 @@ class SubprocessRunner:
             "--verify",  # cli.py:136-142
         ]
         # `embodied-data` shim isn't on PATH in some test envs; fall back to
-        # `python -m embodied_data.cli`.
+        # `<sys.executable> -m embodied_data.cli`. Use `sys.executable` rather
+        # than literal `python` because macOS dev shells often have only
+        # `python3` (no bare `python`); CI / venv environments may also differ.
         if not shutil.which("embodied-data"):
-            base = ["python", "-m", "embodied_data.cli"] + base[1:]
+            base = [sys.executable, "-m", "embodied_data.cli"] + base[1:]
 
         # prlimit is Linux-only. Best-effort guard per spec §6 HP-1.
         if platform.system() == "Linux" and shutil.which("prlimit"):
@@ -283,9 +349,7 @@ def map_outcome_to_state(outcome: RunOutcome) -> tuple[State, str | None, str | 
     if rc == 1 and last.get("result") == "FAIL":
         # Compose detail list from `_report.py:68` results array.
         fail_names = [
-            r.get("name", "?")
-            for r in (last.get("results") or [])
-            if r.get("status") == "FAIL"
+            r.get("name", "?") for r in (last.get("results") or []) if r.get("status") == "FAIL"
         ]
         msg = (
             "Conversion finished but the 5-check validator flagged the output. "
