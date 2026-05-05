@@ -22,8 +22,33 @@ name: ci
 on:
   push:
     branches: [main]
+    # Path filter at the workflow level: docs-only PRs (e.g. README, landing/
+    # copy) skip the entire workflow rather than firing pytest against a tree
+    # with no `tests/` directory and getting exit-5 ("no tests collected"),
+    # which CI treats as failure. Pytest's own --exitcode-on-no-tests-collected
+    # would mask a genuine "test discovery broke" regression — path filter is
+    # the cleaner gate. See pytest issue tracker on exit code 5 semantics.
+    # Alternative considered: apply `paths-ignore` per-job so the F-1
+    # banned-word grep / lint jobs always run on docs PRs. Rejected for now
+    # to keep the gate scope tight (Allen's call); revisit in W2 if a docs PR
+    # ever needs F-1 coverage that can't be added via a code-touching companion
+    # PR.
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - '.github/workflows/ci.yml'
   # Allow manual trigger from the Actions tab — useful for forcing a re-run
   # against a branch before merge to verify the gates.
   workflow_dispatch:
