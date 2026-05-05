@@ -53,7 +53,11 @@ WORKDIR /home/app
 # [project.optional-dependencies] dev in pyproject.toml).
 # `--no-install-project` is implied because we haven't COPY'd the package source
 # yet — keeps this layer cacheable across app-code-only changes.
-COPY --chown=app:app pyproject.toml uv.lock ./
+# README.md is COPY'd here because pyproject.toml:5 declares
+# `readme = "README.md"`; hatchling (the PEP 517 backend uv invokes during
+# `uv sync`) reads that file to build project metadata, so its absence aborts
+# the sync with `OSError: Readme file does not exist: README.md`.
+COPY --chown=app:app pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # ---- Layer 6: app code (spec §9.1 step 5) -------------------------------------
