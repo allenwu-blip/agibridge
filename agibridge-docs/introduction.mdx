@@ -1,0 +1,85 @@
+---
+title: "Introduction"
+description: "agibridge is a hosted SaaS for embodied-AI dataset preprocessing — bidirectional AgiBot World ↔ LeRobot v3 conversion in your browser, with schema validation, team workflows, and pinned reproducibility."
+---
+
+{/* [VOICE-CHECK] introduction.mdx is the highest-leverage docs surface after Quickstart. Voice inherits Cycle X 7-point profile: literal format names, source-cited claims, no marketing exclamation, "we" where product-direct. */}
+
+## What agibridge is
+
+agibridge converts between two embodied-AI dataset formats in your browser:
+
+- **AgiBot World** (OpenDriveLab — 1,001,552 trajectories / 2,976.4 hrs / 217 tasks across the 2026 release)
+- **Hugging Face LeRobot v3** (consumed by Physical Intelligence's π0, Toyota Research's LBM, NVIDIA's Isaac GR00T)
+
+You upload a tarball, pick a direction, and download the result. Every conversion runs an output verification report covering episode count, camera column names, action-vector shape, and timestamp monotonicity. The underlying converter is the open-source [`embodied-data`](https://pypi.org/project/embodied-data/) library (v0.3.1 GA on PyPI); the hosted layer adds auth, persistent storage, team workflows, and a pinned-version conversion pipeline.
+
+## What agibridge is not
+
+- Not an ML training platform. agibridge does not run inference on customer data.
+- Not a dataset catalog. Your data stays in your per-organization storage prefix.
+- Not a one-click "any-format → any-format" converter. The supported surface today is AgiBot World ↔ LeRobot v3. Open X-Embodiment, RLDS, LIBERO, and custom HDF5 schemas are on the roadmap, not the product.
+
+## Who agibridge is for
+
+Three audiences drive every design decision:
+
+<CardGroup cols={3}>
+  <Card title="PhD students & researchers" icon="graduation-cap">
+    Free preview lets you verify a 1-episode conversion before paying. Solo tier is $50/mo.
+  </Card>
+  <Card title="Robotics startup engineers" icon="users">
+    Team tier ($250/mo, 3 seats) replaces internal `any4lerobot` glue scripts and conda whack-a-mole.
+  </Card>
+  <Card title="AV / large-lab perception leads" icon="building">
+    Enterprise tier ($1,000/mo) with per-org storage isolation and 90-day retention.
+  </Card>
+</CardGroup>
+
+## Where to start
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Sign up → first successful conversion in under 10 minutes.
+  </Card>
+  <Card title="First conversion walkthrough" icon="play" href="/first-conversion">
+    Step-by-step: upload an AgiBot World tarball, get LeRobot v3 back.
+  </Card>
+  <Card title="Concepts" icon="lightbulb" href="/concepts/conversion-model">
+    Mental model for the conversion pipeline, schema validation, and storage isolation.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/presign-upload">
+    The 5 MVP endpoints with curl, Python, and TypeScript examples.
+  </Card>
+</CardGroup>
+
+## Why this exists
+
+LeRobot v3 became the de-facto VLA training format in 2025, and the v2→v3 migration has been rougher than the official announcement suggests. Five open issues on `huggingface/lerobot` ([#2158](https://github.com/huggingface/lerobot/issues/2158), [#2128](https://github.com/huggingface/lerobot/issues/2128), [#2446](https://github.com/huggingface/lerobot/issues/2446), [#761](https://github.com/huggingface/lerobot/issues/761), [#846](https://github.com/huggingface/lerobot/issues/846)) document concrete breakage. Physical Intelligence's `openpi` script is pinned to LeRobot v2.1 ([openpi#443](https://github.com/Physical-Intelligence/openpi/issues/443)). AgiBot World's official repo is pinned to LeRobot v2 commit `2b71789`. If you train VLAs on multiple upstream datasets, a non-trivial fraction of your week goes to downgrading dependencies and patching deprecated scripts.
+
+agibridge pins the conversion pipeline to a known-good `embodied-data` v0.3.1 + LeRobot v3 version. A conversion you run today produces the same output as one you ran last month, no version drift between users, no "works on my Python 3.11 but not your 3.12".
+
+## Self-hosting is supported
+
+The underlying converter is Apache-2.0 open source. If you would rather run conversion locally:
+
+```bash
+pip install embodied-data==0.3.1
+embodied-data convert --source agibot_world --target lerobot_v3 ./input.tar.gz ./output/
+```
+
+The hosted backend pins the same library version published on PyPI. Self-hosted output is byte-identical to hosted output for the same pinned version. See the [Pricing concepts page](/concepts/pricing) for the honest framing on self-host vs hosted.
+
+## What's next
+
+- [Quickstart](/quickstart) — 5-step path from signup to first conversion
+- [First conversion walkthrough](/first-conversion) — annotated step-by-step
+- [Concepts: How conversion runs](/concepts/conversion-model) — the mental model
+- [API Reference](/api-reference/presign-upload) — programmatic integration (Clerk JWT today, API keys D5+)
+
+## Sources
+
+- AgiBot World 2026 release stats — [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) (accessed 2026-05-14)
+- LeRobot v3 announcement — [huggingface.co/blog/lerobot-datasets-v3](https://huggingface.co/blog/lerobot-datasets-v3) (accessed 2026-05-14)
+- `embodied-data` PyPI — [pypi.org/project/embodied-data/](https://pypi.org/project/embodied-data/) (accessed 2026-05-14)
+- AgiBot README LeRobot v2 commit pin — [github.com/OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) (accessed 2026-05-14)

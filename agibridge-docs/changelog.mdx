@@ -1,0 +1,81 @@
+---
+title: "Changelog"
+description: "Every shipped change, reverse-chronological. Tier-default changes, breaking API changes, and embodied-data lib version bumps all appear here."
+---
+
+For every release we publish:
+
+- agibridge release date + tag
+- `embodied-data` lib version pinned
+- API surface changes (new endpoints, breaking changes, deprecations)
+- UI changes (new features, bug fixes)
+- Schema validation changes (new checks added, false-positive fixes)
+- Soft cap or retention changes (any tier-default change gets an entry)
+
+Entries tagged `[BREAKING]` / `[DEPRECATED]` / `[ADDED]` / `[FIXED]`.
+
+---
+
+## v0.1.0 — TBD (placeholder)
+
+<Note>
+**Status**: pre-release placeholder. v0.1.0 ships when D4 (Clerk + Stripe + DB-backed JobStore) and the deploy wave complete. Target: first paying customer by 2026-07-11.
+</Note>
+
+### Pinned versions
+
+- `embodied-data` library: `0.3.1` (PyPI GA)
+- Backend FastAPI: TBD
+- Frontend bundle: TBD
+
+### Expected scope
+
+- `[ADDED]` Clerk authentication + B2B organizations
+- `[ADDED]` Stripe Checkout + Customer Portal for tier upgrades
+- `[ADDED]` Postgres-backed job store (replaces in-memory SessionStore from F-1 hobby cut)
+- `[ADDED]` Per-organization R2 storage isolation (R3 invariant)
+- `[ADDED]` 5 MVP API endpoints (presign-upload, create-job, list-jobs, get-job, presign-download)
+- `[ADDED]` Dashboard with TanStack Query polling (2s active / 5s queued per-job, 3s active / 30s idle global)
+- `[ADDED]` Schema verification report on every job (4 classes: episode count, action shape, camera names, timestamps)
+- `[ADDED]` Tier gating: Free tier `max_episodes=1`, soft cap ladder 5/50/200/∞ per tier
+- `[ADDED]` Transactional emails via Resend (welcome, job-complete, job-failed, upgrade-prompt)
+- `[ADDED]` Sentry error tracking + R3-isolation-breach + R2-presign-mismatch alerts
+- `[ADDED]` Vercel-hosted frontend, HF Space Docker backend, Neon Postgres, Cloudflare R2
+
+### Known limitations at v0.1.0
+
+- API keys not yet issued; Clerk JWT only (D5+ feature wave)
+- GPU conversion not yet available; CPU only
+- Only AgiBot World ↔ LeRobot v3 supported; other formats on roadmap
+- Org switcher UI deferred until 3+ multi-org users observed
+- Annual billing deferred to W3+
+- SOC 2 compliance deferred to first enterprise customer requirement
+
+---
+
+## Pre-v0.1.0 development log
+
+Pre-release development is tracked in `PROJECT_STATUS.md` and `DECISIONS.md` (DR-001 through DR-018). The public changelog starts at v0.1.0.
+
+Notable pre-release milestones (internal reference only):
+
+- 2026-05-12 — Project pivot from F-1 hobby to commercial B2B SaaS; charter ratified.
+- 2026-05-14 — D1-D3 ships: Postgres schema, DB-backed JobStore, R2 client, R3 isolation test (47/47 green).
+- 2026-05-14 — D4 specs finalized; backend, frontend, DevOps subagent dispatches ready to fire.
+
+---
+
+## Changelog policy
+
+- Every release gets an entry, even patch-level fixes.
+- Tier soft caps and retention windows: increases are silent (no notice required), decreases require 60-day email notice.
+- Breaking API changes ship with a migration guide on the same release. Old endpoints stay valid for the documented deprecation window (60 days minimum per `marketing/site-copy/docs-structure.md` §4).
+- `embodied-data` lib version bump → entry here even if no agibridge-level change.
+
+## Sources
+
+- Versioning strategy — `marketing/site-copy/docs-structure.md` §4 (Cycle X)
+- v0.1.0 scope — `dispatches/D4_specs.md` §8 acceptance criteria
+- Deprecation policy — `marketing/site-copy/docs-structure.md` §4
+- `embodied-data` v0.3.1 GA — [pypi.org/project/embodied-data/](https://pypi.org/project/embodied-data/) (accessed 2026-05-14)
+- Pre-release tracking — `PROJECT_STATUS.md`, `DECISIONS.md` (DR-001 → DR-018)

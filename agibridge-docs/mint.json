@@ -1,0 +1,120 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "agibridge",
+  "logo": {
+    "light": "/images/logo-light.svg",
+    "dark": "/images/logo-dark.svg",
+    "href": "https://agibridge.com"
+  },
+  "favicon": "/images/favicon.svg",
+  "colors": {
+    "primary": "#0F172A",
+    "light": "#334155",
+    "dark": "#0F172A",
+    "anchors": {
+      "from": "#0F172A",
+      "to": "#475569"
+    },
+    "background": {
+      "light": "#FFFFFF",
+      "dark": "#0B1220"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "Pricing",
+      "url": "https://agibridge.com/pricing"
+    },
+    {
+      "name": "GitHub",
+      "url": "https://github.com/allenwu-blip/embodied-data"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Start free preview",
+    "url": "https://agibridge.com/sign-up"
+  },
+  "anchors": [
+    {
+      "name": "API Reference",
+      "icon": "code",
+      "url": "api-reference"
+    },
+    {
+      "name": "SDKs",
+      "icon": "cube",
+      "url": "sdks"
+    },
+    {
+      "name": "PyPI: embodied-data",
+      "icon": "python",
+      "url": "https://pypi.org/project/embodied-data/"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "quickstart",
+        "first-conversion"
+      ]
+    },
+    {
+      "group": "Concepts",
+      "pages": [
+        "concepts/data-formats",
+        "concepts/conversion-model",
+        "concepts/r3-isolation",
+        "concepts/pricing"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/presign-upload",
+        "api-reference/create-job",
+        "api-reference/list-jobs",
+        "api-reference/get-job",
+        "api-reference/presign-download"
+      ]
+    },
+    {
+      "group": "Migrations",
+      "pages": [
+        "migrations/lerobot-v2-to-v3",
+        "migrations/agibot-to-lerobot"
+      ]
+    },
+    {
+      "group": "SDKs",
+      "pages": [
+        "sdks/python",
+        "sdks/typescript"
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        "faq",
+        "changelog"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/allenwu-blip/embodied-data",
+    "x": "https://x.com/agibridge"
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true,
+    "raiseIssue": true
+  },
+  "modeToggle": {
+    "default": "system",
+    "isHidden": false
+  },
+  "search": {
+    "prompt": "Search agibridge docs"
+  }
+}

@@ -1,0 +1,29 @@
+[
+ {
+  "episode_id": 936938,
+  "label_info": {
+   "action_config": [
+    {
+     "start_frame": 0,
+     "end_frame": 20,
+     "action_text": "Pick up the straw on the milk tea cup with right arm.",
+     "skill": "Pick"
+    },
+    {
+     "start_frame": 19,
+     "end_frame": 20,
+     "action_text": "Grasp the milk tea cup on the table with left arm.",
+     "skill": "Grasp"
+    },
+    {
+     "start_frame": 19,
+     "end_frame": 20,
+     "action_text": "Insert the picked-up straw into the milk tea cup with right arm.",
+     "skill": "Insert"
+    }
+   ]
+  },
+  "task_name": "Insert the straw",
+  "init_scene_text": "The milk tea cup and the straw are on the table in front of the robot, the straw is placed on the lid of the cup."
+ }
+]

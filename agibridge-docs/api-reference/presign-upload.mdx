@@ -1,0 +1,133 @@
+---
+title: "Presign upload"
+description: "Get a Cloudflare R2 pre-signed PUT URL for uploading a conversion input directly from browser to storage."
+api: "POST https://api.agibridge.com/api/v1/jobs/presign-upload"
+---
+
+Returns an R2 pre-signed PUT URL and a freshly-created `job_id`. The browser PUTs the tarball directly to R2; the backend never proxies bytes.
+
+**Endpoint signature**: `POST /api/v1/jobs/presign-upload` — cited from `dispatches/D4_specs.md` §3 amendment #3 line 55.
+
+## Authentication
+
+All requests require a Clerk JWT in the `Authorization: Bearer ...` header. The JWT's `org_id` claim determines the storage prefix `orgs/{org_id}/jobs/{job_id}/input/`. The `org_id` is **never** read from request body — see [R3 isolation](/concepts/r3-isolation).
+
+## Request body
+
+```json
+{
+  "filename": "agibot_world_episodes_0_to_99.tar.gz",
+  "size_bytes": 2400000000,
+  "content_type": "application/gzip"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filename` | string | yes | Original filename. Used for the R2 object key suffix and the dashboard display name. |
+| `size_bytes` | integer | yes | Expected upload size in bytes. Backend checks against tier single-upload cap (Free 5 GB, Solo 50 GB, Team 200 GB, Enterprise unlimited). |
+| `content_type` | string | no | MIME type. Defaults to `application/octet-stream`. Supported: `application/gzip`, `application/x-tar`, `application/zip`. |
+
+## Response — 200 OK
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "upload_url": "https://agibridge-prod.r2.cloudflarestorage.com/orgs/org_2YxMq.../jobs/job_2YxMq.../input/agibot_world_episodes_0_to_99.tar.gz?X-Amz-...",
+  "upload_url_expires_at": "2026-05-14T18:15:00Z",
+  "expires_in_seconds": 900
+}
+```
+
+The `upload_url` is a 15-minute TTL pre-signed PUT URL. After expiration, call `presign-upload` again with the same `filename` to renew (the `job_id` stays the same).
+
+## Error responses
+
+| Status | Code | When |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid Clerk JWT |
+| 402 | `tier_soft_cap_exceeded` | Org's monthly job count exceeds tier soft cap |
+| 413 | `upload_too_large` | `size_bytes` exceeds tier single-upload cap |
+| 415 | `unsupported_content_type` | `content_type` not in the supported list |
+| 429 | `rate_limited` | More than 30 req/min on this endpoint |
+
+## Code examples
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.agibridge.com/api/v1/jobs/presign-upload \
+  -H "Authorization: Bearer $CLERK_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "agibot_world_episodes_0_to_99.tar.gz",
+    "size_bytes": 2400000000,
+    "content_type": "application/gzip"
+  }'
+```
+
+```python Python
+import httpx
+
+response = httpx.post(
+    "https://api.agibridge.com/api/v1/jobs/presign-upload",
+    headers={"Authorization": f"Bearer {clerk_jwt}"},
+    json={
+        "filename": "agibot_world_episodes_0_to_99.tar.gz",
+        "size_bytes": 2_400_000_000,
+        "content_type": "application/gzip",
+    },
+)
+response.raise_for_status()
+data = response.json()
+job_id = data["job_id"]
+upload_url = data["upload_url"]
+
+# Upload the file directly to R2
+with open("agibot_world_episodes_0_to_99.tar.gz", "rb") as f:
+    upload_response = httpx.put(upload_url, content=f.read(), timeout=900)
+    upload_response.raise_for_status()
+```
+
+```typescript TypeScript
+const response = await fetch(
+  "https://api.agibridge.com/api/v1/jobs/presign-upload",
+  {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${clerkJwt}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      filename: "agibot_world_episodes_0_to_99.tar.gz",
+      size_bytes: 2_400_000_000,
+      content_type: "application/gzip",
+    }),
+  }
+);
+
+if (!response.ok) throw new Error(`presign-upload failed: ${response.status}`);
+const { job_id, upload_url } = await response.json();
+
+// Upload directly to R2
+const fileBlob = await file.arrayBuffer();
+const uploadResponse = await fetch(upload_url, {
+  method: "PUT",
+  body: fileBlob,
+});
+if (!uploadResponse.ok) throw new Error(`R2 upload failed: ${uploadResponse.status}`);
+```
+
+</CodeGroup>
+
+## Next step
+
+After the R2 PUT completes, call [`POST /api/v1/jobs`](/api-reference/create-job) to notify the backend that the upload is complete and kick off the conversion.
+
+## Sources
+
+- Endpoint signature — `dispatches/D4_specs.md` §3 amendment #3 line 55
+- R2 prefix derivation from JWT — `dispatches/D4_specs.md` §3 amendment #6
+- R2 pre-signed PUT URL TTL convention (15 min) — Cloudflare R2 docs at [developers.cloudflare.com/r2/api/s3/presigned-urls/](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) (accessed 2026-05-14)
+- Tier upload caps — `DECISIONS.md` DR-018 default #2; [FAQ Q7](/faq)
+- Clerk JWT middleware — `dispatches/D4_specs.md` §4 backend story #2

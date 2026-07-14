@@ -1,0 +1,122 @@
+---
+title: "Quickstart"
+description: "Signup to first successful conversion in 5 minutes wall-clock. No `pip install`, no Python required."
+---
+
+{/* [VOICE-CHECK] Quickstart numbered-steps voice matches technical-audience expectation (numbered, time-budgeted, exact UI labels). The "5-minute" claim is a product-target; benchmark on prod build before publishing the 5-min number per Cycle X §2. */}
+
+This quickstart takes you from "I have an AgiBot World tarball" to "I have a verified LeRobot v3 dataset" in under 10 minutes.
+
+## Before you start
+
+You need:
+
+- A small AgiBot World tarball (or use [our 1-episode sample](https://github.com/allenwu-blip/embodied-data/releases) — link launches W2)
+- A modern browser; **no `pip install`, no Python required**
+- Optional: a Google Workspace account if you want to create an organization later
+
+You do **not** need a credit card. The Free tier auto-provisions on first sign-in.
+
+## Step 1 — Sign in (~30 sec)
+
+<Steps>
+  <Step title="Click Sign in">
+    From [agibridge.com](https://agibridge.com), click **Sign in** in the header. Auth is handled by Clerk.
+  </Step>
+  <Step title="Free tier auto-provisions">
+    First sign-in creates a single-seat solo organization automatically. No card required, no email verification gate.
+  </Step>
+  <Step title="Land on the dashboard">
+    You see an empty conversion history table and a **New conversion** button. That is the whole UI surface.
+  </Step>
+</Steps>
+
+## Step 2 — Upload a tarball (~1 min)
+
+<Steps>
+  <Step title="Click New conversion">
+    Top-right of the dashboard.
+  </Step>
+  <Step title="Drag a tarball into the upload zone">
+    Supported: `.tar`, `.tar.gz`, `.zip`. Free tier cap is 5 GB per upload. If you don't have a dataset handy, click **Use sample** to pull the 1-episode AgiBot World preview.
+  </Step>
+  <Step title="Set direction">
+    Pick **AgiBot World → LeRobot v3**. Free tier supports this direction only; the reverse direction unlocks at Solo ($50/mo).
+  </Step>
+  <Step title="Click Convert">
+    Upload begins. R2 multipart pre-signed URLs handle the upload directly from your browser to storage; the backend never proxies bytes.
+  </Step>
+</Steps>
+
+## Step 3 — Wait for conversion (~3 min for 1-episode preview)
+
+The progress bar shows five states:
+
+1. **Uploading** — browser to R2 via pre-signed URL
+2. **Queued** — backend received upload-complete notification, job in queue
+3. **Converting** — `embodied-data` subprocess running
+4. **Verifying** — re-reading converted output for schema integrity
+5. **Download-ready** — pre-signed download URL surfaces in the dashboard
+
+You can navigate away. Free tier outputs are retained for 24 hours.
+
+<Note>
+Job-status polling cadence is 2 seconds while the job is active, 5 seconds while queued (per dashboard rehydration spec). If you keep the tab open, the row updates in place.
+</Note>
+
+## Step 4 — Download and validate (~30 sec)
+
+<Steps>
+  <Step title="Click Download LeRobot v3 dataset">
+    Pre-signed URL appears when status flips to `done`. Click downloads a `.tar.gz` of the converted dataset.
+  </Step>
+  <Step title="Click Download verification report">
+    A JSON file with four classes of validation:
+    - Episode count (input vs output)
+    - Action-vector shape (dtype + dimensions)
+    - Camera column names (matches the `lerobot#2128` pain point)
+    - Timestamp monotonicity (strictly increasing per episode)
+
+    Any failed check shows up as a structured `{error, suggestion}` envelope.
+  </Step>
+  <Step title="Optional — spot-check locally">
+    ```bash
+    pip install lerobot
+    lerobot-edit-dataset --repo-id local:./downloaded_dataset --inspect
+    ```
+  </Step>
+</Steps>
+
+## What you just did
+
+- Authenticated through Clerk
+- Uploaded a tarball to per-org R2 storage at the prefix `orgs/{your_org_id}/jobs/{job_id}/input/`
+- Ran the pinned `embodied-data` v0.3.1 converter via a subprocess on the hosted backend
+- Got back a verified LeRobot v3 dataset under `orgs/{your_org_id}/jobs/{job_id}/output/`
+
+The same backend code path serves every conversion. There is no separate Free-tier code path — only a `--max-episodes=1` flag enforced server-side from the JWT-derived org tier.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="First conversion walkthrough" icon="play" href="/first-conversion">
+    Annotated version of this flow with more context per step.
+  </Card>
+  <Card title="Concepts: conversion model" icon="lightbulb" href="/concepts/conversion-model">
+    What runs where, what gets retained, what gets validated.
+  </Card>
+  <Card title="Upgrade to Solo ($50/mo)" icon="arrow-up" href="https://agibridge.com/pricing">
+    Full-dataset conversion in both directions, 30-day retention, 50 jobs/month.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/presign-upload">
+    Hit the same 5 endpoints the web UI uses.
+  </Card>
+</CardGroup>
+
+## Sources
+
+- R2 multipart pre-signed URLs — Cloudflare R2 docs, presigned URL pattern documented at [developers.cloudflare.com/r2/api/s3/presigned-urls/](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) (accessed 2026-05-14)
+- Polling cadences — `frontend/D4_rehydration_spec.md` §3 (Cycle H)
+- R2 prefix scheme — `dispatches/D4_specs.md` §3 amendment #6 (`orgs/{org_id}/jobs/{job_id}/`)
+- Free tier soft caps — `DECISIONS.md` DR-018 defaults #1, #2, #3
+- Verification report fields — `dispatches/D4_specs.md` §4 backend story #4

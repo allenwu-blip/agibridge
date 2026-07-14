@@ -1,0 +1,115 @@
+# HF Space sync — push backend to huggingface.co/spaces/allenwu06/agibridge.
+#
+# Inherits prior F-1 pattern (allenwu-blip/agibridge commit ba7f1fe; same file
+# at .github/workflows/hf-sync.yml) with these intentional changes:
+#
+#   1. The hf-space/README.md "config block promotion" step from the F-1 version
+#      is RETAINED — HF Space repos still require the YAML config at root README.
+#   2. No banned-word check on the rewrite (F-1 gate removed).
+#   3. workflow_run trigger gated on `ci.yml` named `ci` — same pattern as
+#      prior commit ba7f1fe ("HP-1: gate HF push on CI success"). Critical
+#      because the prior pre-W1 version fired on push:main in parallel with
+#      ci, so a red CI merge would still mirror to HF.
+#
+# Source-grounded (URLs accessed 2026-05-13):
+#   - workflow_run docs:
+#     https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#workflow_run
+#   - HF manual git push:
+#     https://huggingface.co/docs/hub/spaces-github-actions#alternative-manual-git-push
+#   - HF Docker Spaces config:
+#     https://huggingface.co/docs/hub/spaces-sdks-docker
+#
+# Username asymmetry note (per project_agibridge memory):
+#   HF username = allenwu06 (confirmed by Allen in prior session)
+#   GH username = allenwu-blip
+# Targeted use of allenwu06 in HF-context ONLY; never propagate to GH paths.
+
+name: hf-sync
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+  # Manual nudge for cases where ci was green but HF rebuild silently fizzled.
+  workflow_dispatch:
+
+concurrency:
+  group: hf-sync
+  # cancel-in-progress: false — let an in-flight HF push finish; the next push queues.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    # Skip on red ci. workflow_dispatch invocations carry no event.workflow_run
+    # context, so the manual trigger always proceeds.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + LFS)
+        uses: actions/checkout@v4
+        with:
+          # HF Space git is independent of GH; shallow clones cause
+          # "shallow update not allowed" on push.
+          fetch-depth: 0
+          lfs: true
+      - name: Promote hf-space/README.md → root README for HF push
+        # Only runs if hf-space/README.md exists in the repo (Tech Writer
+        # deliverable in W2 — for D1-D3 backend-only push, the existing root
+        # README is sufficient and this step skips).
+        run: |
+          set -euo pipefail
+          git config user.email "noreply@github.com"
+          git config user.name "agibridge HF sync bot"
+          if [ -f hf-space/README.md ]; then
+            head -1 hf-space/README.md | grep -qE '^---$' || {
+              echo "::error::hf-space/README.md missing YAML front-matter."
+              exit 1
+            }
+            cp hf-space/README.md README.md
+            git add README.md
+            git commit -m "hf-sync: promote hf-space/README.md to root for HF Space rebuild" || true
+          else
+            echo "hf-space/README.md not present; skipping promotion (D1-D3 backend-only sync)."
+          fi
+      - name: Flatten to orphan + push to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        # HF Space git has a pre-receive hook that scans the ENTIRE pushed
+        # history for raw binary blobs (requires LFS/Xet). The GH initial
+        # commit added tests/fixtures/**/*.h5 (1.5MB AgiBot fixture, pytest-
+        # only); `git rm` in a later commit does NOT help because the blob
+        # still exists in earlier pushed history.
+        #
+        # The HF Space is a DEPLOY MIRROR — it needs the current file tree to
+        # build the Dockerfile, not GH history. So we push a single ORPHAN
+        # commit (no parents) of the current tree minus tests/fixtures. No
+        # .h5 exists anywhere in the pushed history → hook passes. GH origin
+        # is never touched (ephemeral Actions checkout only); the pytest suite
+        # keeps its fixtures on GitHub.
+        run: |
+          set -euo pipefail
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "::error::HF_TOKEN secret missing. Set via: gh secret set HF_TOKEN --body \"hf_xxx\""
+            exit 1
+          fi
+          git config user.email "noreply@github.com"
+          git config user.name "agibridge HF sync bot"
+          # Working tree already has the promoted root README.md (prior step).
+          rm -rf tests/fixtures
+          git checkout --orphan hf-clean
+          git rm -r --quiet --cached tests/fixtures 2>/dev/null || true
+          git add -A
+          git commit -q -m "agibridge HF Space deploy mirror — flattened runtime tree (no history, no binaries)"
+          # --force: the HF mirror's single-commit history is owned entirely
+          # by this workflow; any direct push to HF (anti-pattern) is replaced.
+          git push --force \
+            "https://allenwu06:${HF_TOKEN}@huggingface.co/spaces/allenwu06/agibridge" \
+            hf-clean:main
+      - name: Note HF rebuild trigger
+        run: |
+          echo "Pushed to HF Space allenwu06/agibridge."
+          echo "Rebuild logs: https://huggingface.co/spaces/allenwu06/agibridge?logs=build"

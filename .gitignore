@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local-only artifacts
+/tmp_test_runs/
+*.local.toml
+_workspace/

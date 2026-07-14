@@ -1,0 +1,121 @@
+---
+title: "Create job"
+description: "Notify the backend that an R2 upload completed and kick off the conversion subprocess."
+api: "POST https://api.agibridge.com/api/v1/jobs"
+---
+
+Call this endpoint after the R2 PUT from [`presign-upload`](/api-reference/presign-upload) returns 200. The backend flips the job from `created` to `queued` and the worker picks it up.
+
+**Endpoint signature**: `POST /api/v1/jobs` — cited from `dispatches/D4_specs.md` §3 amendment #3 line 56.
+
+## Authentication
+
+Clerk JWT in `Authorization: Bearer ...` header. The `org_id` claim must match the org that owns `job_id`; otherwise the response is 404 (not 403 — see [R3 isolation](/concepts/r3-isolation)).
+
+## Request body
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "direction": "agibot_world_to_lerobot_v3",
+  "options": {
+    "max_episodes": null
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `job_id` | string | yes | The `job_id` returned from `presign-upload`. |
+| `direction` | enum | yes | One of `agibot_world_to_lerobot_v3` or `lerobot_v3_to_agibot_world`. Free tier supports `agibot_world_to_lerobot_v3` only. |
+| `options.max_episodes` | integer\|null | no | Cap conversion at the first N episodes. Free tier is hard-coded to `max_episodes=1` server-side regardless of this value. |
+
+## Response — 200 OK
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "status": "queued",
+  "direction": "agibot_world_to_lerobot_v3",
+  "filename": "agibot_world_episodes_0_to_99.tar.gz",
+  "created_at": "2026-05-14T18:00:00Z",
+  "queued_at": "2026-05-14T18:00:05Z",
+  "options": {
+    "max_episodes": null
+  }
+}
+```
+
+## Error responses
+
+| Status | Code | When |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid Clerk JWT |
+| 402 | `tier_direction_blocked` | Free tier called with `lerobot_v3_to_agibot_world` |
+| 404 | `job_not_found` | `job_id` does not exist or belongs to a different org |
+| 409 | `job_already_queued` | `job_id` is already past the `created` state |
+| 422 | `r2_upload_incomplete` | R2 PUT did not complete; the object key does not exist at the expected prefix |
+
+## Code examples
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://api.agibridge.com/api/v1/jobs \
+  -H "Authorization: Bearer $CLERK_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_id": "job_2YxMq...",
+    "direction": "agibot_world_to_lerobot_v3"
+  }'
+```
+
+```python Python
+import httpx
+
+response = httpx.post(
+    "https://api.agibridge.com/api/v1/jobs",
+    headers={"Authorization": f"Bearer {clerk_jwt}"},
+    json={
+        "job_id": job_id,
+        "direction": "agibot_world_to_lerobot_v3",
+        "options": {"max_episodes": None},
+    },
+)
+response.raise_for_status()
+job = response.json()
+print(f"Job {job['job_id']} is now {job['status']}")
+```
+
+```typescript TypeScript
+const response = await fetch("https://api.agibridge.com/api/v1/jobs", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${clerkJwt}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    job_id,
+    direction: "agibot_world_to_lerobot_v3",
+    options: { max_episodes: null },
+  }),
+});
+
+if (!response.ok) throw new Error(`create-job failed: ${response.status}`);
+const job = await response.json();
+console.log(`Job ${job.job_id} is now ${job.status}`);
+```
+
+</CodeGroup>
+
+## What happens next
+
+The worker picks up the queued job and runs the conversion subprocess. Poll [`GET /api/v1/jobs/{job_id}`](/api-reference/get-job) at 2-second intervals (per the dashboard polling cadence) until status flips to a terminal state (`done`, `failed`, or `cancelled`).
+
+## Sources
+
+- Endpoint signature — `dispatches/D4_specs.md` §3 amendment #3 line 56
+- Free-tier `max_episodes=1` enforcement — `dispatches/D4_specs.md` §4 backend story #8
+- Direction enum — `marketing/site-copy/docs-structure.md` Guides 1 + 2 (Cycle X)
+- R3 isolation 404 vs 403 posture — `concepts/r3-isolation.mdx`
+- Polling cadence — `frontend/D4_rehydration_spec.md` §3 (Cycle H)

@@ -1,0 +1,93 @@
+---
+title: "Pricing model"
+description: "Why agibridge has published tiers, what each tier includes, and when self-hosting makes more sense than paying."
+---
+
+{/* [VOICE-CHECK] Pricing concept page leans marketing-adjacent. Voice is the "published-tier, honest-tradeoff" framing from Cycle X homepage value-prop 3. */}
+
+This page is the conceptual framing for pricing. The canonical tier table lives at [agibridge.com/pricing](https://agibridge.com/pricing); this page is the "why".
+
+## Four tiers, all published
+
+| Tier | Price | Seats | Single-upload cap | Soft cap (jobs/mo) | Retention | Direction |
+|---|---|---|---|---|---|---|
+| Free | $0 | 1 | 5 GB | 5 | 24h | AgiBot → LeRobot v3 only |
+| Solo | $50/mo | 1 | 50 GB | 50 | 30 days | Bidirectional |
+| Team | $250/mo | 3 | 200 GB | 200 | 30 days | Bidirectional |
+| Enterprise | $1,000/mo | Unlimited | Unlimited (fair-use) | Unlimited | 90 days | Bidirectional |
+
+All tiers are self-serve. Enterprise has a contact-us flow for procurement / NET-30 / annual contracts, but the $1,000/mo floor is visible.
+
+## Why published pricing
+
+Hugging Face hosts the data formats but charges per-storage-TB and expects client-side Python conversion. Encord and Scale Nucleus are enterprise-only contact-sales — no published price under ~$1,500/mo per third-party intelligence. Voxel51 is open-source-or-contact-sales bimodal.
+
+The $50-$1,000/mo price band for embodied-AI dataset workflow is structurally empty. agibridge fills that gap with self-serve, monthly, published pricing.
+
+A two-person YC robotics startup converting AgiBot World episodes into LeRobot v3 for a π0-derivative policy can pay $250/mo and onboard 3 teammates today. Same workflow on Encord requires a sales call, contract negotiation, and a price floor estimated north of $1,500/mo. Pricing should be a button, not a phone call.
+
+## What you're actually paying for
+
+You are **not** paying for the converter. The converter is the open-source [`embodied-data`](https://pypi.org/project/embodied-data/) library, Apache-2.0 licensed, available via `pip install embodied-data==0.3.1` for free.
+
+You **are** paying for:
+
+1. **Pinned reproducibility**. A conversion you run on the hosted backend today produces the same output as one you ran last month. No version drift across users, no "works on my Python 3.11 but not your 3.12".
+2. **Persistent storage**. R2-backed per-org prefix with tier-appropriate retention. You don't manage object lifecycles.
+3. **Team workflows**. Clerk-backed organizations with shared conversion history, invite flow, and seat management.
+4. **Verification report on every conversion**. Same `embodied-data validate` checks the OSS lib runs, packaged into a JSON artifact and surfaced in the dashboard.
+5. **CPU compute for the conversion subprocess**. You don't pay AWS / GCP / your local cluster's compute hours.
+
+## When self-hosting makes more sense
+
+The lib stays free. If any of these apply, self-host:
+
+- **Air-gapped infrastructure**. You can't reach `*.agibridge.com` from your network.
+- **Data-residency requirements**. Your customer contract requires data stays in a specific jurisdiction; you control where R2 buckets aren't an option.
+- **High-volume conversion**. You run >200 conversions/month and the Team tier's soft cap doesn't fit. Enterprise is $1,000/mo unlimited but if your team can stand up `pip install embodied-data` and run it on internal compute, you might prefer that.
+- **Custom format support**. You convert formats we don't support yet (Open X-Embodiment, RLDS, LIBERO, custom HDF5).
+
+Self-host workflow:
+
+```bash
+pip install embodied-data==0.3.1
+embodied-data convert --source agibot_world --target lerobot_v3 ./input.tar.gz ./output/
+embodied-data validate ./output/
+```
+
+The pinned version is published in our [changelog](/changelog) for every agibridge release. If you self-host with the same pinned version, you get byte-identical conversion output.
+
+If you self-host long-term and the lib saves you time, [sponsor it on GitHub](https://github.com/sponsors/allenwu-blip). The library is the load-bearing piece and stays free either way.
+
+## When the hosted UI makes more sense
+
+If any of these apply, the hosted path saves you time:
+
+- **You want to stop maintaining Python environments**. The conda-environment whack-a-mole between TensorFlow and PyTorch versions costs more than $50/mo in engineering time.
+- **You work on a team of 2-3 people**. The shared conversion history and invite flow replaces "DM me your `info.json` and I'll re-run the converter."
+- **You convert a few datasets a month**. The $50/mo Solo tier is cheaper than the engineering time to run conversion locally.
+- **You want byte-identical output across teammates**. Pinned version + hosted pipeline removes "works on my machine" drift.
+- **3-day output retention is acceptable**. Free tier 24h is for previews; Solo / Team's 30 days is the working window.
+
+## What's NOT included at any tier
+
+- GPU conversion (CPU only at MVP; GPU is on the roadmap)
+- Custom format support beyond AgiBot World ↔ LeRobot v3
+- ML inference on customer data (agibridge is conversion-only by design)
+- SOC 2 / formal compliance reports (W3+ when first enterprise customer requires it)
+- API keys for programmatic access (D5+ feature wave)
+- Webhook delivery for job-status notifications (deferred)
+
+## Pricing changes policy
+
+If we change tier pricing, existing customers stay grandfathered at their current price for 12 months minimum. Tier soft caps and retention windows can change in either direction — increases are silent, decreases get a 60-day email notice.
+
+## Sources
+
+- Tier pricing — `DECISIONS.md` DR-003 (LOCKED)
+- Soft cap ladder — `DECISIONS.md` DR-018 default #2
+- Retention windows — `DECISIONS.md` DR-018 default #3
+- Competitive landscape (Encord $60M Series C, Scale ~$1,500/mo, HF per-TB) — `_day1_research/competitive_landscape.md` §2.1, §2.4, §2.5
+- Structural pricing gap — `_day1_research/competitive_landscape.md` §5 Gap 2
+- `embodied-data` Apache-2.0 + PyPI — [pypi.org/project/embodied-data/](https://pypi.org/project/embodied-data/) (accessed 2026-05-14)
+- Self-host honest framing — `marketing/site-copy/docs-structure.md` Guide 5 (Cycle X)

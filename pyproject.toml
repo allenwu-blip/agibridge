@@ -1,0 +1,130 @@
+[project]
+name = "agibridge"
+version = "0.0.1"
+description = "Convert AgiBot World <-> LeRobot v3 datasets in your browser. Ephemeral, no accounts."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "Allen Wu", email = "allenwu@umich.edu" }]
+# Top-level pins per spec v2.2 §9.1. Hard pin embodied-data (DR-3a=B locked).
+dependencies = [
+    "embodied-data==0.3.1",
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.30,<0.31",
+    "python-multipart>=0.0.9",
+    "python-magic>=0.4.27",
+    "python-ulid>=2.7.0",
+    # Commercial cut (W1 D1-D3): Postgres, Alembic, R2 S3-compat client.
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "alembic>=1.13,<1.14",
+    "asyncpg>=0.29,<0.30",
+    "psycopg[binary]>=3.1,<3.2",
+    "boto3>=1.34,<1.35",
+    # D4-A Story #2: Clerk JWT verification. PyJWT chosen over python-jose:
+    # actively maintained, built-in PyJWKClient (JWKS fetch + in-process
+    # cache), RS256 native; python-jose has an algorithm-confusion CVE
+    # history and slower maintenance. `[crypto]` pulls `cryptography` for
+    # RS256 verification (and test-side RSA keypair generation).
+    "pyjwt[crypto]>=2.9,<3.0",
+    # D4-B Story #6/#7: Stripe Checkout + Customer Portal + webhook handler.
+    # Tight pin matches the embodied-data==0.3.1 discipline (Cycle G,
+    # stripe_webhook_spec.md:242). 8.x resolves to 8.11.0; the
+    # construct_event signature (payload, sig_header, secret, tolerance=300)
+    # + SignatureVerificationError class path were verified empirically
+    # against this range before pinning (DR-020 lesson: build to verified
+    # ground truth, not assumed API shape).
+    "stripe>=8.0,<9.0",
+    # Clerk auto-personal-org provisioning: Svix-signed `user.created`
+    # webhook (Clerk delivers org/user lifecycle events via Svix, same as
+    # Stripe-Signature for Stripe). `svix.webhooks.Webhook(secret).verify(
+    # body, headers)` -> parsed payload, raises WebhookVerificationError on
+    # bad sig / missing headers / stale timestamp — verified empirically
+    # against svix==1.93.0 (`inspect.signature(Webhook.verify)` ==
+    # `(self, data: bytes|str, headers: Dict[str,str]) -> Any`; missing
+    # headers AND bad HMAC both raise the SAME WebhookVerificationError,
+    # mirroring stripe construct_event's collapsed taxonomy). Range pin
+    # matches the stripe>=8.0,<9.0 discipline: allow 1.x, block the
+    # unreleased 2.0 major (latest is 1.93.0; DR-020 build-to-verified).
+    "svix>=1.40,<2.0",
+    # Clerk Backend API client (GET/PATCH /v1/users/{id} for the
+    # merge-not-clobber public_metadata.org_id write). httpx was already a
+    # transitive runtime dep via svix, but it is now a FIRST-PARTY app
+    # import (`app/api/webhooks.py`) so it is declared explicitly here —
+    # implicit-transitive is the DR-020 anti-pattern. Same lower bound as
+    # the dev extra (`httpx>=0.27`); async client matches the FastAPI loop.
+    "httpx>=0.27",
+    # D4-harden Check 3a: application-layer rate limiting for the PUBLIC
+    # pre-auth endpoints (/health, /version, /billing/webhook) before the
+    # HF Space flips public. slowapi is the de-facto Starlette/FastAPI
+    # limiter (Flask-Limiter port); in-memory storage is correct here —
+    # single uvicorn worker on a single HF Space, no Redis (per
+    # specs/rate-limit-abuse-v1.md §2.2 "in-memory dict ... lost on
+    # container restart" is acceptable for a per-IP burst gate, distinct
+    # from the Postgres-backed per-org daily counters that spec defers to
+    # D5+). Minimal slice of the Cycle AU spec: only the 3 public endpoints.
+    "slowapi>=0.1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
+    "httpx>=0.27",
+    "freezegun>=1.5",
+    "ruff>=0.6",
+    # Test infra for R3 isolation suite (sqlite in-memory).
+    "aiosqlite>=0.20,<0.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Per-test wall-clock cap — defense-in-depth so a future hung test fails loudly
+# (Failed: Timeout >120.0s) instead of silently consuming the full CI job
+# wall-clock (the W2 backend→main run burned 12m34s on apt-get install ffmpeg
+# while pytest itself ran in 7.08s; see GH run 25358121687 job 74351539145).
+# Local 43-test full run is ~7s; the slowest test
+# (test_runner_uvloop_fallback_does_not_killpg_self with its 1s SIGTERM grace
+# and 0.3s sleep) is ~2.4s, so 120s is ~50x headroom. Override per-test with
+# `@pytest.mark.timeout(N)` if needed. Plugin: pytest-timeout==2.4.0.
+timeout = 120
+
+[tool.coverage.run]
+source = ["app/api"]
+omit = ["app/main.py"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+# S (bandit) deliberately omitted: this is a subprocess wrapper around a
+# pinned trusted binary; bandit's S6xx false-positives drown the signal.
+# Re-enable selectively if a target pattern emerges.
+ignore = [
+    "B008",   # FastAPI requires File()/Form() in argument defaults
+    "RUF005", # list concatenation is clearer here
+    "UP042",  # str+Enum is the FastAPI/Pydantic idiom for serialization
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "E501"]  # asserts + long lines OK in tests
+"app/api/status.py" = ["E501"]  # docstrings cite spec line ranges
+"app/api/upload.py" = ["E501"]
+"app/main.py" = ["E501"]
+"app/schemas.py" = ["E501"]
+"tools/**/*.py" = ["E501"]  # utility/tooling scripts (subagent-authored, not product code path) — line-length not enforced

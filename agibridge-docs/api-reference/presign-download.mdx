@@ -1,0 +1,142 @@
+---
+title: "Presign download"
+description: "Get a Cloudflare R2 pre-signed GET URL for downloading the converted output of a completed job."
+api: "GET https://api.agibridge.com/api/v1/jobs/{job_id}/presign-download"
+---
+
+Returns an R2 pre-signed GET URL for the converted output. The browser downloads directly from R2; the backend never proxies bytes.
+
+**Endpoint signature**: `GET /api/v1/jobs/{job_id}/presign-download` — cited from `dispatches/D4_specs.md` §3 amendment #3 line 59.
+
+## Authentication and isolation
+
+Clerk JWT in `Authorization: Bearer ...` header. The backend looks up the job by `(job_id, org_id)` tuple — cross-org `job_id` returns 404. The signed URL's R2 key prefix is derived from `request.state.org_id` (Clerk JWT claim), never from request body — see `dispatches/D4_specs.md` §3 amendment #6.
+
+## Path parameters
+
+| Param | Type | Description |
+|---|---|---|
+| `job_id` | string | Job identifier. Must be in terminal `done` state. |
+
+## Query parameters
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `artifact` | enum | `output` | Which artifact to download. One of `output` (converted tarball), `verification_report` (JSON report), or `input` (original upload, available on Solo+ tiers). |
+
+## Response — 200 OK
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "artifact": "output",
+  "download_url": "https://agibridge-prod.r2.cloudflarestorage.com/orgs/org_2YxMq.../jobs/job_2YxMq.../output/lerobot_v3_dataset.tar.gz?X-Amz-...",
+  "download_url_expires_at": "2026-05-14T18:30:00Z",
+  "expires_in_seconds": 900,
+  "filename": "lerobot_v3_dataset.tar.gz",
+  "size_bytes": 1850000000,
+  "content_type": "application/gzip"
+}
+```
+
+The `download_url` is a 15-minute TTL pre-signed GET URL. After expiration, call this endpoint again to renew. The artifact itself stays in R2 for the tier's full retention window (24h / 30d / 30d / 90d).
+
+## Error responses
+
+| Status | Code | When |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid Clerk JWT |
+| 404 | `job_not_found` | `job_id` does not exist or belongs to a different org |
+| 409 | `job_not_done` | Job is not in `done` state yet (could be `converting`, `queued`, `failed`, etc.) |
+| 410 | `artifact_expired` | Job is `done` but the artifact has been deleted past the retention window |
+| 422 | `invalid_artifact` | `artifact` query param is not one of the supported values |
+
+## Code examples
+
+<CodeGroup>
+
+```bash cURL
+curl "https://api.agibridge.com/api/v1/jobs/job_2YxMq.../presign-download?artifact=output" \
+  -H "Authorization: Bearer $CLERK_JWT"
+
+# Use the returned download_url
+curl -o lerobot_v3_dataset.tar.gz "$DOWNLOAD_URL"
+```
+
+```python Python
+import httpx
+from pathlib import Path
+
+# Get the presigned download URL
+response = httpx.get(
+    f"https://api.agibridge.com/api/v1/jobs/{job_id}/presign-download",
+    headers={"Authorization": f"Bearer {clerk_jwt}"},
+    params={"artifact": "output"},
+)
+response.raise_for_status()
+data = response.json()
+
+# Stream the download directly from R2
+output_path = Path(data["filename"])
+with httpx.stream("GET", data["download_url"], timeout=900) as download:
+    download.raise_for_status()
+    with output_path.open("wb") as f:
+        for chunk in download.iter_bytes(chunk_size=8 * 1024 * 1024):
+            f.write(chunk)
+
+print(f"Downloaded {output_path} ({output_path.stat().st_size} bytes)")
+
+# Also fetch the verification report
+report_response = httpx.get(
+    f"https://api.agibridge.com/api/v1/jobs/{job_id}/presign-download",
+    headers={"Authorization": f"Bearer {clerk_jwt}"},
+    params={"artifact": "verification_report"},
+)
+report_response.raise_for_status()
+report_url = report_response.json()["download_url"]
+report = httpx.get(report_url).json()
+print("Verification:", report)
+```
+
+```typescript TypeScript
+// Get the presigned download URL
+const params = new URLSearchParams({ artifact: "output" });
+const response = await fetch(
+  `https://api.agibridge.com/api/v1/jobs/${jobId}/presign-download?${params}`,
+  { headers: { Authorization: `Bearer ${clerkJwt}` } }
+);
+
+if (!response.ok) throw new Error(`presign-download ${response.status}`);
+const { download_url, filename } = await response.json();
+
+// Trigger browser download
+const link = document.createElement("a");
+link.href = download_url;
+link.download = filename;
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
+```
+
+</CodeGroup>
+
+## Retention
+
+Once a job is `done`, the artifacts stay in R2 for the tier's retention window:
+
+| Tier | Retention |
+|---|---|
+| Free | 24 hours |
+| Solo | 30 days |
+| Team | 30 days |
+| Enterprise | 90 days |
+
+After the retention window, R2 returns 410 on `presign-download` for the deleted artifact. The job record itself (status, verification report metadata) is retained indefinitely.
+
+## Sources
+
+- Endpoint signature — `dispatches/D4_specs.md` §3 amendment #3 line 59
+- R2 prefix derivation from JWT, not request body — `dispatches/D4_specs.md` §3 amendment #6
+- R2 pre-signed GET URL TTL (15 min) — Cloudflare R2 docs, [developers.cloudflare.com/r2/api/s3/presigned-urls/](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) (accessed 2026-05-14)
+- Retention windows per tier — `DECISIONS.md` DR-018 default #3
+- Cross-org 404 posture — `concepts/r3-isolation.mdx`

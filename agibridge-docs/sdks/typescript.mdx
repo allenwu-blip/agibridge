@@ -1,0 +1,219 @@
+---
+title: "TypeScript SDK"
+description: "Types-first TypeScript client for agibridge — browser, Node.js 20+ LTS, Deno, Bun, Cloudflare Workers. Ships in the D5+ feature wave."
+---
+
+<Note>
+**Status**: contract published; implementation in the D5+ feature wave. The MVP backend (D4) ships Clerk JWT only. API keys land with the SDK in D5+.
+</Note>
+
+## Install
+
+```bash
+npm install agibridge
+# or
+pnpm add agibridge
+# or
+bun add agibridge
+```
+
+npm package name: `agibridge` (verified available 2026-05-14 — `https://registry.npmjs.org/agibridge` returned HTTP 404). Scoped fallback `@agibridge/sdk` also reserved.
+
+## Targets
+
+| Target | Module format | Auth source |
+|---|---|---|
+| Browser (Vite, Next.js, Remix) | ESM | Clerk JWT via `useAuth().getToken()` |
+| Node.js ≥20 LTS | ESM + CJS dual | `process.env.AGIBRIDGE_API_KEY` |
+| Deno / Bun / Cloudflare Workers | ESM | Runtime env binding |
+
+Browsers: ES2022 baseline (Chrome 94+, Firefox 93+, Safari 15+). TypeScript ≥5.0 recommended.
+
+## Authenticate — browser
+
+In a Clerk-authenticated React app, pass the Clerk JWT through:
+
+```tsx
+import { useAuth } from "@clerk/clerk-react";
+import { Agibridge } from "agibridge";
+
+function MyComponent() {
+  const { getToken } = useAuth();
+
+  const handleUpload = async () => {
+    const jwt = await getToken();
+    if (!jwt) throw new Error("not signed in");
+
+    const client = new Agibridge({ token: jwt });
+    const presign = await client.jobs.presignUpload({
+      filename: "agibot_world.tar.gz",
+      sizeBytes: 2_400_000_000,
+    });
+    // ...
+  };
+}
+```
+
+**Never** bundle a secret key into browser code. The SDK constructor throws `AgibridgeError` if `agibridge_sk_...` is detected in a browser context (`typeof window !== 'undefined'`), modeled on Stripe.js refusing secret keys in the browser ([stripe.com/docs/js/initializing](https://stripe.com/docs/js/initializing) accessed 2026-05-14).
+
+## Authenticate — server (Node.js / edge)
+
+```typescript
+import { Agibridge } from "agibridge";
+
+// From explicit argument
+const client = new Agibridge({ apiKey: "agibridge_sk_..." });
+
+// Or from env var (default)
+const client = new Agibridge(); // reads AGIBRIDGE_API_KEY
+```
+
+## Full conversion flow
+
+```typescript
+import { Agibridge } from "agibridge";
+import { readFile } from "node:fs/promises";
+
+const client = new Agibridge({ apiKey: process.env.AGIBRIDGE_API_KEY });
+
+// 1. Presign + upload
+const presign = await client.jobs.presignUpload({
+  filename: "agibot_world.tar.gz",
+  sizeBytes: 2_400_000_000,
+});
+
+const fileBytes = await readFile("./agibot_world.tar.gz");
+await client.jobs.upload(presign, fileBytes);
+
+// 2. Create job
+const job = await client.jobs.create({
+  jobId: presign.jobId,
+  direction: "agibot_world_to_lerobot_v3",
+});
+
+// 3. Wait for completion (uses dashboard cadence: 2s active / 5s queued)
+const final = await client.jobs.wait(job.jobId, { timeoutMs: 1_800_000 });
+
+if (final.status === "done") {
+  console.log("Verification:", final.verificationReport);
+  await client.jobs.download({
+    jobId: final.jobId,
+    artifact: "output",
+    destPath: "./output.tar.gz",
+  });
+} else {
+  console.error("Conversion failed:", final.error);
+}
+```
+
+## Type-safe responses
+
+Every method returns a fully-typed response. No `any`, no `unknown` leaking past the SDK boundary.
+
+```typescript
+import type { Agibridge, Job, PresignUploadResponse } from "agibridge";
+
+const client = new Agibridge();
+const presign: PresignUploadResponse = await client.jobs.presignUpload({ /* ... */ });
+const job: Job = await client.jobs.create({ /* ... */ });
+
+// Discriminated union on status
+if (job.status === "done") {
+  // TypeScript knows job.verificationReport is defined
+  console.log(job.verificationReport.episodeCount.output);
+}
+if (job.status === "failed") {
+  // TypeScript knows job.error is defined
+  console.log(job.error.suggestion);
+}
+```
+
+## Error handling
+
+```typescript
+import { Agibridge, AgibridgeError, RateLimitError, TierCapExceededError } from "agibridge";
+
+try {
+  await client.jobs.presignUpload({ /* ... */ });
+} catch (err) {
+  if (err instanceof TierCapExceededError) {
+    console.log(`Upgrade tier — cap is ${err.tierCapBytes} bytes`);
+  } else if (err instanceof RateLimitError) {
+    console.log(`Retry after ${err.retryAfterSeconds}s`);
+  } else if (err instanceof AgibridgeError) {
+    console.error("Unexpected:", err);
+  }
+}
+```
+
+## Async iteration for pagination
+
+```typescript
+for await (const job of client.jobs.list({ status: "done" })) {
+  console.log(job.jobId, job.filename);
+}
+```
+
+Or page-at-a-time:
+
+```typescript
+const page = await client.jobs.listPage({ status: "done", limit: 50 });
+console.log(page.jobs, page.hasMore, page.nextCursor);
+```
+
+## Edge runtime: Cloudflare Workers
+
+```typescript
+// worker.ts
+import { Agibridge } from "agibridge";
+
+export default {
+  async fetch(request: Request, env: { AGIBRIDGE_API_KEY: string }): Promise<Response> {
+    const client = new Agibridge({ apiKey: env.AGIBRIDGE_API_KEY });
+    const jobs = await client.jobs.listPage({ limit: 10 });
+    return Response.json(jobs);
+  },
+};
+```
+
+Same shape on Deno (`Deno.env.get`) and Bun (`Bun.env`). All use the Web `fetch` API; no shim required.
+
+## React hook (optional)
+
+For Clerk + TanStack Query workflows, the SDK ships an optional `@agibridge/react` companion package:
+
+```tsx
+import { useJobs, useJob } from "@agibridge/react";
+
+function Dashboard() {
+  const { data: jobs, isLoading } = useJobs({ status: "active" });
+  // Polling cadence baked in: 3s active / 30s idle (matches dashboard spec)
+}
+
+function JobDetail({ jobId }: { jobId: string }) {
+  const { data: job } = useJob(jobId);
+  // Polling cadence baked in: 2s active / 5s queued
+}
+```
+
+`@agibridge/react` is a thin wrapper around the core SDK + TanStack Query v5; you can replicate it manually with `useQuery({ queryKey: ['job', jobId], refetchInterval: 2000 })` if you prefer not to add a dependency.
+
+## Bundle size
+
+Core SDK target: <15 KB gzipped (no `node:*` imports, no `axios` / `node-fetch`, Web `fetch` only). Tree-shake-friendly per-method imports for advanced bundlers.
+
+## Compatibility
+
+- Node.js: ≥20 LTS (Node 18 EOL April 2025 per [nodejs.org/en/about/previous-releases](https://nodejs.org/en/about/previous-releases) accessed 2026-05-14)
+- Browsers: ES2022 baseline — Chrome 94+, Firefox 93+, Safari 15+
+- TypeScript: ≥5.0
+
+## Sources
+
+- Full spec — `sdk/typescript-spec.md` (Cycle AA Wave 3)
+- npm name availability — `https://registry.npmjs.org/agibridge` HTTP 404 (verified 2026-05-14)
+- Node.js LTS schedule — [nodejs.org/en/about/previous-releases](https://nodejs.org/en/about/previous-releases) (accessed 2026-05-14)
+- Browser secret-key safety pattern — [stripe.com/docs/js/initializing](https://stripe.com/docs/js/initializing) (accessed 2026-05-14)
+- TanStack Query — [tanstack.com/query/latest](https://tanstack.com/query/latest) (accessed 2026-05-14)
+- Polling cadences — `frontend/D4_rehydration_spec.md` §3 (Cycle H)
+- Ship date — D5+ feature wave (per `dispatches/D4_specs.md`)

@@ -1,0 +1,203 @@
+---
+title: "Python SDK"
+description: "Idiomatic Python client for agibridge — sync + async, batch helpers, retry / pagination. Ships in the D5+ feature wave."
+---
+
+<Note>
+**Status**: contract published; implementation in the D5+ feature wave. The MVP backend (D4) ships Clerk JWT only. API keys land with the SDK in D5+. This page documents the contract — when the SDK ships, this page is the canonical reference.
+</Note>
+
+## Install
+
+```bash
+pip install agibridge
+```
+
+PyPI package name: `agibridge` (verified available 2026-05-14 — `https://pypi.org/pypi/agibridge/json` returned HTTP 404).
+
+## Authenticate
+
+The SDK supports two auth methods:
+
+| Surface | Auth method | Token format |
+|---|---|---|
+| Server / CI / programmatic | API key | `agibridge_sk_<base64>` |
+| Browser embed (rare) | Publishable key | `agibridge_pk_<base64>` |
+
+API keys are issued from the agibridge dashboard (D5+). The prefix pattern `agibridge_sk_` allows GitHub's secret-scanning to detect leaks.
+
+```python
+from agibridge import Agibridge
+
+# From explicit argument
+client = Agibridge(api_key="agibridge_sk_...")
+
+# Or from $AGIBRIDGE_API_KEY env var (default)
+client = Agibridge()
+```
+
+## Sync usage
+
+The sync client wraps `httpx.Client`. Use this in Jupyter notebooks, `python script.py` workflows, and anything that doesn't already speak async.
+
+```python
+from agibridge import Agibridge
+
+client = Agibridge(api_key="agibridge_sk_...")
+
+# 1. Presign upload + upload bytes
+presign = client.jobs.presign_upload(
+    filename="agibot_world_episodes_0_to_99.tar.gz",
+    size_bytes=2_400_000_000,
+)
+client.jobs.upload(presign, file_path="./agibot_world_episodes_0_to_99.tar.gz")
+
+# 2. Notify backend upload complete
+job = client.jobs.create(
+    job_id=presign.job_id,
+    direction="agibot_world_to_lerobot_v3",
+)
+
+# 3. Poll until done (uses dashboard cadence: 2s active / 5s queued)
+job = client.jobs.wait(job.job_id, timeout=1800)
+
+if job.status == "done":
+    print("Verification:", job.verification_report)
+    output_path = client.jobs.download(job.job_id, artifact="output", dest="./output.tar.gz")
+    print(f"Downloaded to {output_path}")
+else:
+    print("Conversion failed:", job.error)
+```
+
+## Async usage
+
+The async client wraps `httpx.AsyncClient`. Use this in Prefect / Dagster / Ray pipelines, FastAPI handlers, and anywhere async/await is the native style.
+
+```python
+from agibridge import AsyncAgibridge
+
+async def convert_dataset(file_path: str):
+    async with AsyncAgibridge(api_key="agibridge_sk_...") as client:
+        presign = await client.jobs.presign_upload(
+            filename=file_path.split("/")[-1],
+            size_bytes=os.path.getsize(file_path),
+        )
+        await client.jobs.upload(presign, file_path=file_path)
+        job = await client.jobs.create(
+            job_id=presign.job_id,
+            direction="agibot_world_to_lerobot_v3",
+        )
+        job = await client.jobs.wait(job.job_id, timeout=1800)
+        return job
+```
+
+## Batch conversion
+
+Common pattern for PhD students batch-converting multiple datasets:
+
+```python
+from agibridge import Agibridge
+from pathlib import Path
+
+client = Agibridge()
+tarballs = list(Path("./datasets/").glob("*.tar.gz"))
+
+# Launch all conversions in parallel
+jobs = []
+for tarball in tarballs:
+    presign = client.jobs.presign_upload(
+        filename=tarball.name,
+        size_bytes=tarball.stat().st_size,
+    )
+    client.jobs.upload(presign, file_path=str(tarball))
+    job = client.jobs.create(
+        job_id=presign.job_id,
+        direction="agibot_world_to_lerobot_v3",
+    )
+    jobs.append(job)
+
+# Wait for all to complete
+for job in jobs:
+    final = client.jobs.wait(job.job_id, timeout=1800)
+    print(f"{final.job_id}: {final.status}")
+```
+
+For higher concurrency, use the async client with `asyncio.gather()`.
+
+## Error handling
+
+Every error surfaces as an `AgibridgeError` subclass:
+
+```python
+from agibridge import Agibridge, AgibridgeError, RateLimitError, TierCapExceededError
+
+client = Agibridge()
+
+try:
+    presign = client.jobs.presign_upload(filename="huge.tar.gz", size_bytes=100_000_000_000)
+except TierCapExceededError as e:
+    print(f"Upgrade tier — current cap is {e.tier_cap_bytes} bytes")
+except RateLimitError as e:
+    print(f"Rate limited; retry after {e.retry_after_seconds}s")
+except AgibridgeError as e:
+    print(f"Unexpected error: {e}")
+```
+
+## Retry policy
+
+The SDK has built-in exponential-backoff retry for transient failures (`429`, `5xx`, network errors). Defaults match Stripe Python conventions:
+
+- Max retries: 3
+- Initial backoff: 0.5s
+- Backoff multiplier: 2.0
+- Max backoff: 8s
+
+Override per-call:
+
+```python
+client.jobs.list(retry_config=RetryConfig(max_retries=5, max_backoff=30))
+```
+
+## Pagination
+
+`client.jobs.list()` returns a cursor-paginated iterator. The SDK handles cursor passing automatically:
+
+```python
+for job in client.jobs.list(status="done"):
+    print(job.job_id, job.filename)
+```
+
+To get a single page only:
+
+```python
+page = client.jobs.list_page(status="done", limit=50)
+print(page.jobs, page.has_more, page.next_cursor)
+```
+
+## Type safety
+
+Every public method is fully typed. The SDK ships a `py.typed` marker per [PEP 561](https://peps.python.org/pep-0561/) for downstream mypy/pyright compatibility.
+
+```python
+from agibridge import Agibridge, Job, PresignUploadResponse
+
+client: Agibridge = Agibridge()
+presign: PresignUploadResponse = client.jobs.presign_upload(...)
+job: Job = client.jobs.create(...)
+```
+
+## Compatibility
+
+- Python ≥3.10 (drops 3.9 per `embodied-data` lib's stance)
+- Wraps `httpx` ≥0.27, <1.0
+- Tested on Linux / macOS / Windows
+
+## Sources
+
+- Full spec — `sdk/python-spec.md` (Cycle AA Wave 3)
+- PyPI name availability — `https://pypi.org/pypi/agibridge/json` HTTP 404 (verified 2026-05-14)
+- httpx version — [python-httpx.org](https://www.python-httpx.org/) (accessed 2026-05-14, latest 0.28.1)
+- Stripe Python sync-first pattern — [stripe.com/docs/api?lang=python](https://stripe.com/docs/api?lang=python) (accessed 2026-05-14)
+- API key prefix + GitHub secret scanning — [stripe.com/docs/security#secret-scanning](https://stripe.com/docs/security#secret-scanning) (accessed 2026-05-14)
+- PEP 561 typing — [peps.python.org/pep-0561](https://peps.python.org/pep-0561/) (accessed 2026-05-14)
+- Ship date — D5+ feature wave (per `dispatches/D4_specs.md`)

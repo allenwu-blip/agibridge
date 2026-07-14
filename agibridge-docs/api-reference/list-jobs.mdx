@@ -1,0 +1,135 @@
+---
+title: "List jobs"
+description: "Paginated list of all conversion jobs in the authenticated org."
+api: "GET https://api.agibridge.com/api/v1/jobs"
+---
+
+Returns every job that belongs to the authenticated org, paginated and sorted by `created_at` descending. The dashboard hits this endpoint on every load and refetches every 3 seconds while at least one job is active (30 seconds while all jobs are idle).
+
+**Endpoint signature**: `GET /api/v1/jobs` — cited from `dispatches/D4_specs.md` §3 amendment #3 line 57.
+
+## Authentication
+
+Clerk JWT in `Authorization: Bearer ...` header. Returns only jobs where `jobs.org_id == jwt.org_id`.
+
+## Query parameters
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 50 | Max jobs per page. Hard cap 200. |
+| `cursor` | string | null | Pagination cursor. Pass the `next_cursor` from a prior response. |
+| `status` | enum | null | Filter to a single status: `created`, `uploading`, `queued`, `converting`, `verifying`, `done`, `failed`, `cancelled`. |
+| `direction` | enum | null | Filter to a direction: `agibot_world_to_lerobot_v3` or `lerobot_v3_to_agibot_world`. |
+
+## Response — 200 OK
+
+```json
+{
+  "jobs": [
+    {
+      "job_id": "job_2YxMq...",
+      "status": "done",
+      "direction": "agibot_world_to_lerobot_v3",
+      "filename": "agibot_world_episodes_0_to_99.tar.gz",
+      "created_at": "2026-05-14T18:00:00Z",
+      "started_at": "2026-05-14T18:00:30Z",
+      "completed_at": "2026-05-14T18:23:00Z",
+      "duration_seconds": 1380,
+      "episode_count_input": 100,
+      "episode_count_output": 100
+    }
+  ],
+  "next_cursor": "eyJjcmVhdGVkX2F0IjoiMjAyNi0wNS0xNFQxNzowMDowMFoifQ==",
+  "has_more": true
+}
+```
+
+`next_cursor` is `null` when there are no more pages.
+
+## Rate limits
+
+Per `dispatches/D4_specs.md` §3 amendment #2, the dashboard polls this endpoint at:
+
+- 3 seconds while at least one job is active
+- 30 seconds while all jobs are idle (terminal)
+
+Backend allows up to 30 req/min per user on this endpoint without 429. Higher rates will get rate-limited.
+
+## Error responses
+
+| Status | Code | When |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid Clerk JWT |
+| 422 | `invalid_cursor` | Cursor is malformed or expired (cursors are valid for 1 hour) |
+| 429 | `rate_limited` | Exceeded 30 req/min |
+
+## Code examples
+
+<CodeGroup>
+
+```bash cURL
+curl "https://api.agibridge.com/api/v1/jobs?limit=50&status=done" \
+  -H "Authorization: Bearer $CLERK_JWT"
+```
+
+```python Python
+import httpx
+
+response = httpx.get(
+    "https://api.agibridge.com/api/v1/jobs",
+    headers={"Authorization": f"Bearer {clerk_jwt}"},
+    params={"limit": 50, "status": "done"},
+)
+response.raise_for_status()
+data = response.json()
+
+for job in data["jobs"]:
+    print(f"{job['job_id']}: {job['status']} ({job['filename']})")
+
+# Paginate through remaining pages
+while data["has_more"]:
+    response = httpx.get(
+        "https://api.agibridge.com/api/v1/jobs",
+        headers={"Authorization": f"Bearer {clerk_jwt}"},
+        params={"cursor": data["next_cursor"]},
+    )
+    response.raise_for_status()
+    data = response.json()
+    for job in data["jobs"]:
+        print(f"{job['job_id']}: {job['status']}")
+```
+
+```typescript TypeScript
+const params = new URLSearchParams({ limit: "50", status: "done" });
+const response = await fetch(
+  `https://api.agibridge.com/api/v1/jobs?${params}`,
+  { headers: { Authorization: `Bearer ${clerkJwt}` } }
+);
+
+if (!response.ok) throw new Error(`list-jobs failed: ${response.status}`);
+const data = await response.json();
+
+for (const job of data.jobs) {
+  console.log(`${job.job_id}: ${job.status} (${job.filename})`);
+}
+
+// Paginate
+let cursor = data.next_cursor;
+while (cursor) {
+  const pageResponse = await fetch(
+    `https://api.agibridge.com/api/v1/jobs?cursor=${encodeURIComponent(cursor)}`,
+    { headers: { Authorization: `Bearer ${clerkJwt}` } }
+  );
+  const pageData = await pageResponse.json();
+  cursor = pageData.has_more ? pageData.next_cursor : null;
+}
+```
+
+</CodeGroup>
+
+## Sources
+
+- Endpoint signature — `dispatches/D4_specs.md` §3 amendment #3 line 57
+- Polling cadences (dashboard 3s active / 30s idle) — `dispatches/D4_specs.md` §3 amendment #2 + `frontend/D4_rehydration_spec.md` §3 (Cycle H)
+- Rate limit budget (~30 req/min) — `dispatches/D4_specs.md` §3 amendment #2
+- Cross-org isolation (only own-org jobs returned) — `concepts/r3-isolation.mdx`

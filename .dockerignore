@@ -1,0 +1,106 @@
+# .dockerignore — agibridge-saas
+#
+# Goal: keep build context small + cache-friendly. Anything not needed for
+# `uv sync --frozen` or for the running app should be excluded here.
+# Reference: https://docs.docker.com/build/building/context/#dockerignore-files
+
+# -----------------------------------------------------------------------------
+# Version control
+# -----------------------------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# -----------------------------------------------------------------------------
+# Python build / test artifacts
+# -----------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+dist/
+build/
+*.egg
+
+# -----------------------------------------------------------------------------
+# Virtualenvs — never copy a host venv into the image; uv rebuilds inside.
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+env/
+
+# -----------------------------------------------------------------------------
+# Editor / OS noise
+# -----------------------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# -----------------------------------------------------------------------------
+# Prior F-1 sprint artifacts — DR-001 commercial cut excludes these.
+# Defensive: bootstrap dir should already be filtered, but belt+braces in case
+# any leak in during a future cp -r from the prior repo.
+# -----------------------------------------------------------------------------
+_workspace/
+scripts/check_f1_banned_words.py
+scripts/check_f1_banned_words.sh
+scripts/f1-banned-words.regex
+
+# -----------------------------------------------------------------------------
+# Test inputs not needed at runtime. tests/ is excluded entirely from the
+# image — pytest runs in CI against the source tree, never inside the runtime
+# image. (1.5M of fixtures would otherwise inflate every layer push.)
+# -----------------------------------------------------------------------------
+tests/
+
+# -----------------------------------------------------------------------------
+# Local dev / scratch
+# -----------------------------------------------------------------------------
+tmp_test_runs/
+*.local.toml
+.env
+.env.*
+!.env.example
+
+# -----------------------------------------------------------------------------
+# Frontend lives on Vercel (separate repo / deploy). Excluded from backend image.
+# -----------------------------------------------------------------------------
+frontend/
+node_modules/
+
+# -----------------------------------------------------------------------------
+# Docs / runbooks — don't bake into runtime image. Available in repo for humans.
+# -----------------------------------------------------------------------------
+ops/
+docs/
+daily_log/
+dispatches/
+emails/
+MIGRATION_TODO.md
+LICENSE
+*.md
+!README.md
+
+# -----------------------------------------------------------------------------
+# Alembic migrations — needed at deploy time (run separately, not in app image).
+# Excluded from the runtime image; CI / deploy job applies migrations via
+# `alembic upgrade head` against Neon directly.
+# -----------------------------------------------------------------------------
+alembic/
+alembic.ini
+
+# -----------------------------------------------------------------------------
+# Pre-commit / tooling configs not needed inside the image
+# -----------------------------------------------------------------------------
+.pre-commit-config.yaml

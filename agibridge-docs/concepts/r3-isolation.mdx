@@ -1,0 +1,64 @@
+---
+title: "R3: cross-organization isolation"
+description: "How agibridge segregates your data from other customers — code-level invariant, not a soft check."
+---
+
+R3 is our internal risk-register name for "cross-organization data isolation". This page documents the invariants and where they are enforced in code.
+
+## The guarantee
+
+Every conversion job, input tarball, converted output, and verification report belongs to exactly one Clerk Organization. No request, signed or otherwise, can read or write across the org boundary.
+
+The enforcement lives in three places:
+
+1. **JWT-derived org_id**. Every authenticated request injects `org_id` into `request.state.org_id` from the Clerk JWT claim, **not from request body**. A forged request body cannot trick the backend into accessing another org's data.
+2. **Keyword-only JobStore API**. `JobStore.get(*, job_id, org_id=...)` requires `org_id` as a keyword-only argument. Positional calls fail at type-check time; this is enforced via Python's `*` separator in the signature.
+3. **R2 prefix invariant**. Every R2 pre-signed URL refuses to sign any key whose prefix does not match `orgs/{org_id}/jobs/{job_id}/`. The `org_id` and `job_id` are both derived from authenticated state, never from request body.
+
+## What this means at the storage layer
+
+Cloudflare R2 IAM tokens are scoped per-bucket, not per-prefix (this is a Cloudflare constraint, verified at [developers.cloudflare.com/r2/api/s3/tokens/](https://developers.cloudflare.com/r2/api/s3/tokens/) accessed 2026-05-14). The hosted backend uses a single R2 token with read/write on the `agibridge-prod` bucket. Per-organization isolation is enforced at the **application layer** — every read/write operation is gated by the keyword-only `org_id` check before any R2 API call is issued.
+
+This is a deliberate choice. A per-prefix IAM model would push isolation into Cloudflare's policy engine and lose application-layer auditability. The current model means every cross-org access attempt is logged in Sentry with a `R3-isolation-breach` tag.
+
+## What this means at the database layer
+
+The `jobs` table in Postgres has a composite index on `(org_id, job_id)`. Every job lookup uses both keys; querying by `job_id` alone is impossible through the JobStore API. If you somehow had another org's `job_id`, you would still get a 404 from `GET /api/v1/jobs/{job_id}` because the backend would compare your JWT-derived `org_id` against the row's `org_id` and reject the mismatch.
+
+## What this means at the auth layer
+
+Clerk's B2B Organizations primitive provides the multi-tenant identity model. Every user belongs to one or more Clerk organizations; every JWT issued by Clerk contains an `org_id` claim. The middleware decodes the JWT, extracts the claim, and injects it as `request.state.org_id`. The Stripe webhook endpoint is the only exception — it authenticates via Stripe-Signature HMAC, not Clerk JWT, and never reads customer data (it only flips `orgs.tier` values).
+
+## What this is NOT
+
+R3 isolation is **not**:
+
+- **SOC 2 compliance**. SOC 2 audit logs and the formal compliance posture launch when the first enterprise customer requires it (per the deferred decisions list).
+- **At-rest encryption beyond R2 defaults**. R2 encrypts at rest by default (AES-256, per Cloudflare). We do not add a customer-managed encryption key layer at MVP.
+- **End-to-end encryption from browser to storage**. Bytes are in plaintext on the way through R2's TLS termination; if you need browser-to-storage E2E encryption, you would self-host.
+- **A GDPR data-handling policy**. We honor deletion requests via the operational answer in [FAQ Q19](/faq); the formal policy page lands W3+.
+
+## How to verify the invariant yourself
+
+If you want to satisfy yourself that R3 holds:
+
+1. **Create two free accounts** under different Gmail addresses. Each gets a separate Clerk organization automatically.
+2. **From account A**, create a conversion job. Note the `job_id` from the dashboard URL (`/jobs/{job_id}`).
+3. **From account B**, navigate to `/jobs/{job_id_from_A}` directly. You should see a 404, not the job details.
+4. **From account B's browser console**, hit `GET /api/v1/jobs/{job_id_from_A}` with account B's JWT. The response is `404 Not Found`, not `403 Forbidden` — we deliberately don't leak the existence of cross-org resources.
+
+The backend test `tests/test_r3_cross_org_isolation.py` runs this exact pattern in CI on every commit.
+
+## What if you find a breach
+
+If you find a way to read across the org boundary, this is a P0 security issue. Email `security@agibridge.com` (or, today, reply to any agibridge email with `SECURITY:` in the subject line). We treat R3 breaches as the highest-severity class.
+
+## Sources
+
+- R2 tokens scope per-bucket, not per-prefix — [developers.cloudflare.com/r2/api/s3/tokens/](https://developers.cloudflare.com/r2/api/s3/tokens/) (accessed 2026-05-14)
+- Keyword-only signature enforcement — `dispatches/D4_specs.md` §3 amendment #6
+- R2 prefix derivation from JWT, not request body — `dispatches/D4_specs.md` §3 amendment #6
+- Clerk B2B Organizations — [clerk.com/docs/organizations/overview](https://clerk.com/docs/organizations/overview) (accessed 2026-05-14)
+- Stripe webhook exemption — `dispatches/D4_specs.md` §3 amendment #1
+- R3 isolation test — `tests/test_r3_cross_org_isolation.py` (47/47 tests green per D1-D3)
+- Sentry R3-isolation-breach alert — `ops/sentry-alerts.md` (Cycle L)

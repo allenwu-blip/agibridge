@@ -1,0 +1,198 @@
+---
+title: "Get job"
+description: "Fetch a single job's current status and verification report. The endpoint the dashboard polls per-job at 2-second intervals."
+api: "GET https://api.agibridge.com/api/v1/jobs/{job_id}"
+---
+
+Returns the full record for a single job, including the verification report once status is `done`. The dashboard polls this endpoint per-job at 2 seconds while active, 5 seconds while queued.
+
+**Endpoint signature**: `GET /api/v1/jobs/{job_id}` — cited from `dispatches/D4_specs.md` §3 amendment #3 line 58.
+
+## Authentication and isolation
+
+Clerk JWT in `Authorization: Bearer ...` header. Backend enforces `(job_id, org_id)` tuple lookup — see `dispatches/D4_specs.md` §3 amendment #3 line 58 ("backend MUST enforce `(job_id, org_id)` tuple lookup"). A cross-org `job_id` returns 404, not 403 — see [R3 isolation](/concepts/r3-isolation).
+
+## Path parameters
+
+| Param | Type | Description |
+|---|---|---|
+| `job_id` | string | Job identifier returned from `presign-upload` / `create-job`. |
+
+## Response — 200 OK (status=done)
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "status": "done",
+  "direction": "agibot_world_to_lerobot_v3",
+  "filename": "agibot_world_episodes_0_to_99.tar.gz",
+  "created_at": "2026-05-14T18:00:00Z",
+  "started_at": "2026-05-14T18:00:30Z",
+  "completed_at": "2026-05-14T18:23:00Z",
+  "duration_seconds": 1380,
+  "options": {
+    "max_episodes": null
+  },
+  "verification_report": {
+    "episode_count": {
+      "input": 100,
+      "output": 100,
+      "status": "ok"
+    },
+    "action_vector": {
+      "expected_dtype": "float32",
+      "actual_dtype": "float32",
+      "expected_dim": 14,
+      "actual_dim": 14,
+      "status": "ok"
+    },
+    "cameras": {
+      "declared": ["observation.images.cam_high", "observation.images.cam_left_wrist"],
+      "present": ["observation.images.cam_high", "observation.images.cam_left_wrist"],
+      "status": "ok"
+    },
+    "timestamps": {
+      "monotonic": true,
+      "max_jitter_ns": 0,
+      "status": "ok"
+    }
+  },
+  "output_size_bytes": 1850000000,
+  "embodied_data_version": "0.3.1"
+}
+```
+
+## Response — 200 OK (status=failed)
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "status": "failed",
+  "direction": "agibot_world_to_lerobot_v3",
+  "filename": "broken_tarball.tar.gz",
+  "created_at": "2026-05-14T18:00:00Z",
+  "started_at": "2026-05-14T18:00:30Z",
+  "completed_at": "2026-05-14T18:02:15Z",
+  "duration_seconds": 105,
+  "error": {
+    "error": "camera_name_mismatch",
+    "suggestion": "info.json declares observation.images.cam_high but episode_0 contains observation.images.base_0_rgb. Rename keys or update info.json.",
+    "exit_code": 2
+  }
+}
+```
+
+The `error` object shape is the `{error, suggestion, exit_code}` envelope from `embodied-data` — see `src/embodied_data/_emit.py:32-46`.
+
+## Response — 200 OK (status=converting)
+
+```json
+{
+  "job_id": "job_2YxMq...",
+  "status": "converting",
+  "direction": "agibot_world_to_lerobot_v3",
+  "filename": "agibot_world_episodes_0_to_99.tar.gz",
+  "created_at": "2026-05-14T18:00:00Z",
+  "started_at": "2026-05-14T18:00:30Z",
+  "progress": {
+    "episode_index": 47,
+    "episode_total": 100,
+    "fraction": 0.47
+  }
+}
+```
+
+`progress.fraction` is approximate; episode boundaries are deterministic, intra-episode progress is interpolated.
+
+## Error responses
+
+| Status | Code | When |
+|---|---|---|
+| 401 | `unauthorized` | Missing or invalid Clerk JWT |
+| 404 | `job_not_found` | `job_id` does not exist or belongs to a different org (R3 invariant — no leak) |
+| 429 | `rate_limited` | More than 30 req/min on this endpoint (per `dispatches/D4_specs.md` §3 amendment #2) |
+
+## Code examples
+
+<CodeGroup>
+
+```bash cURL
+curl https://api.agibridge.com/api/v1/jobs/job_2YxMq... \
+  -H "Authorization: Bearer $CLERK_JWT"
+```
+
+```python Python
+import httpx
+import time
+
+def poll_until_done(job_id: str, clerk_jwt: str, timeout_seconds: int = 1800):
+    headers = {"Authorization": f"Bearer {clerk_jwt}"}
+    deadline = time.monotonic() + timeout_seconds
+
+    while time.monotonic() < deadline:
+        response = httpx.get(
+            f"https://api.agibridge.com/api/v1/jobs/{job_id}",
+            headers=headers,
+        )
+        response.raise_for_status()
+        job = response.json()
+
+        if job["status"] in {"done", "failed", "cancelled"}:
+            return job
+
+        # Match dashboard cadence: 2s active, 5s queued
+        sleep_s = 5 if job["status"] == "queued" else 2
+        time.sleep(sleep_s)
+
+    raise TimeoutError(f"Job {job_id} did not complete in {timeout_seconds}s")
+
+final_job = poll_until_done(job_id, clerk_jwt)
+if final_job["status"] == "done":
+    print("Conversion succeeded:", final_job["verification_report"])
+else:
+    print("Conversion failed:", final_job["error"])
+```
+
+```typescript TypeScript
+async function pollUntilDone(
+  jobId: string,
+  clerkJwt: string,
+  timeoutMs = 1_800_000
+): Promise<Job> {
+  const deadline = Date.now() + timeoutMs;
+  const headers = { Authorization: `Bearer ${clerkJwt}` };
+
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `https://api.agibridge.com/api/v1/jobs/${jobId}`,
+      { headers }
+    );
+    if (!response.ok) throw new Error(`get-job ${response.status}`);
+    const job: Job = await response.json();
+
+    if (["done", "failed", "cancelled"].includes(job.status)) {
+      return job;
+    }
+
+    const sleepMs = job.status === "queued" ? 5_000 : 2_000;
+    await new Promise((r) => setTimeout(r, sleepMs));
+  }
+
+  throw new Error(`Job ${jobId} did not complete in time`);
+}
+```
+
+</CodeGroup>
+
+## Next step
+
+When `status` flips to `done`, call [`presign-download`](/api-reference/presign-download) to get an R2 pre-signed GET URL for the converted output.
+
+## Sources
+
+- Endpoint signature — `dispatches/D4_specs.md` §3 amendment #3 line 58
+- `(job_id, org_id)` tuple lookup invariant — `dispatches/D4_specs.md` §3 amendment #3 line 58
+- Polling cadence (per-job 2s active / 5s queued) — `frontend/D4_rehydration_spec.md` §3 (Cycle H), `dispatches/D4_specs.md` §3 amendment #2
+- Error envelope shape — `src/embodied_data/_emit.py:32-46`
+- Verification report fields — `dispatches/D4_specs.md` §4 backend story #4
+- R3 isolation 404 posture — `concepts/r3-isolation.mdx`

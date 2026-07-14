@@ -1,0 +1,107 @@
+---
+title: "AgiBot World → LeRobot v3"
+description: "Onboarding to AgiBot World 2026 (1M+ trajectories) and converting subsets to LeRobot v3 for VLA training."
+---
+
+This is the docs-page companion to blog post 05 ("[Working with AgiBot World 2026: a practical onboarding](https://agibridge.com/blog/agibot-1m-trajectory-onboarding)"). Same content focused on the conversion path.
+
+## Why this guide exists
+
+AgiBot World 2026 is the largest open humanoid bimanual manipulation dataset by trajectory count: 1,001,552 trajectories / 2,976.4 hrs / 217 tasks / 87 skills / 106 scenes (per the [AgiBot World Colosseo paper](https://arxiv.org/abs/2503.06669) accessed 2026-05-14 and the [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) repo). It is the data substrate for AgiBot's own GO-1 pre-training and a growing set of derivative VLA models.
+
+The onboarding has three layers of friction:
+
+1. **It's big enough that downloading the whole thing is rarely the right move.**
+2. **The official tooling is pinned to LeRobot v2 commit `2b71789`**, not v3.
+3. **The AgiBot README requires a separate conda environment** to avoid TensorFlow / PyTorch conflicts.
+
+This guide is the path through all three.
+
+## Scale context
+
+| Dataset | Trajectories | Hours | Notes |
+|---|---|---|---|
+| **AgiBot World 2026** | 1,001,552 | 2,976.4 | Humanoid bimanual, 217 tasks |
+| DROID (2024) | 76,000 | 350 | Berkeley + 12 institutions, [arXiv:2403.12945](https://arxiv.org/abs/2403.12945) |
+| BridgeData V2 | 60,096 | — | 24 environments, RAIL Berkeley |
+| Mobile ALOHA | ~few hundred per task | — | [arXiv:2401.02117](https://arxiv.org/abs/2401.02117) (~10 task families) |
+
+AgiBot is roughly an order of magnitude larger than DROID by trajectory count. The "1M" headline is not marketing inflation; it reflects an actual industrial-scale teleop collection across multiple AgiBot facilities.
+
+What this means for engineering:
+
+- **You probably don't want all of it.** Intrinsic data rate (50 Hz bimanual + multiple camera streams + proprioception) means on-disk size is multi-TB.
+- **Subset selection is your first real decision**, not your last.
+- **Conversion costs scale with the slice you pick.** A 5-task slice converts in minutes; the full 217-task release is multi-hour.
+
+## Download strategy
+
+AgiBot World 2026 is hosted at [huggingface.co/datasets/agibot-world](https://huggingface.co/datasets/agibot-world) (accessed 2026-05-14). The 2025 challenge subset at [huggingface.co/datasets/agibot-world/AgiBotWorldChallenge-2025](https://huggingface.co/datasets/agibot-world/AgiBotWorldChallenge-2025) is a reasonable starting point if you want a published-evaluation-protocol slice.
+
+Three subset strategies, in increasing commitment:
+
+1. **Challenge subset only** (10s of GB) — published eval protocol, single-tarball download.
+2. **Task-targeted slice** — pick 5-20 tasks aligned with your fine-tune scope. Use HF's `huggingface-cli download --include` glob filters to pull only the task directories you need.
+3. **Full release** (multi-TB) — only justifiable if you're doing AgiBot-scale pre-training or systematic eval across all 217 tasks.
+
+## Conversion direction wrinkles
+
+AgiBot World 2026 changed control frequency from 30 Hz to 10 Hz between releases (per the AgiBot README, [github.com/OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) accessed 2026-05-14). When converting AgiBot → LeRobot v3:
+
+- The converter re-samples action streams to align with LeRobot's expected frame rate.
+- Verification report flags any frame-alignment drift exceeding tolerance.
+- If your AgiBot subset uses non-standard control frequency (some research subsets vary), pass `--source-control-hz=N` in the upload form options.
+
+For LeRobot v3 → AgiBot direction (reverse), see [the bidirectional concepts page](/concepts/data-formats) for the why and the API for the how.
+
+## Step-by-step on agibridge
+
+1. **Sign in** — see [Quickstart Step 1](/quickstart).
+2. **Pick your AgiBot subset locally**. Use `huggingface-cli download agibot-world --include "tasks/pick_place_*"` or similar.
+3. **Pack into a tarball**: `tar -czf agibot_subset.tar.gz ./downloaded_subset/`.
+4. **Upload via agibridge dashboard** — drag tarball into upload zone, direction `AgiBot World → LeRobot v3`, click Convert.
+5. **Read the verification report** when status flips to `done`. Four classes: episode count, action shape, camera names, timestamps. See [first-conversion walkthrough](/first-conversion) for what to look for.
+6. **Download the LeRobot v3 dataset**. Plug into your VLA training pipeline (`openpi`, `lerobot.scripts.train`, etc.).
+
+## Step-by-step self-hosted
+
+If you'd rather run locally:
+
+```bash
+# 1. Install the pinned version that the hosted backend uses
+pip install embodied-data==0.3.1
+
+# 2. Convert
+embodied-data convert \
+  --source agibot_world \
+  --target lerobot_v3 \
+  ./agibot_subset.tar.gz \
+  ./output/
+
+# 3. Validate
+embodied-data validate ./output/
+```
+
+The CLI runs the same code as the hosted backend. Output is byte-identical for the same pinned version.
+
+## What if conversion fails
+
+The most common failure modes on AgiBot World specifically:
+
+- **Camera-name mismatch** — AgiBot subsets vary in which camera streams they declare. Inspect your subset's `info.json` before uploading.
+- **Action-dim mismatch** — bimanual vs single-arm subsets have different action dims. The verification report will flag this.
+- **Control-frequency declaration missing** — some AgiBot research subsets lack the explicit control_hz field. Pass `--source-control-hz=N` explicitly.
+- **TensorFlow version pin** (self-host only) — AgiBot's source format requires a specific TF version. Use the conda environment per AgiBot README. The hosted backend handles this automatically.
+
+See [FAQ Q12](/faq) for the failure-mode taxonomy and the `embodied-data` `{error, suggestion}` envelope.
+
+## Sources
+
+- AgiBot World 2026 stats — [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) README (accessed 2026-05-14)
+- AgiBot World Colosseo paper — [arxiv.org/abs/2503.06669](https://arxiv.org/abs/2503.06669) (accessed 2026-05-14)
+- AgiBot Hugging Face dataset — [huggingface.co/datasets/agibot-world](https://huggingface.co/datasets/agibot-world) (accessed 2026-05-14)
+- AgiBot challenge subset — [huggingface.co/datasets/agibot-world/AgiBotWorldChallenge-2025](https://huggingface.co/datasets/agibot-world/AgiBotWorldChallenge-2025) (accessed 2026-05-14)
+- Control frequency change 30→10 Hz — `_day1_research/labs_scan.md` §2.C
+- DROID comparison — [arxiv.org/abs/2403.12945](https://arxiv.org/abs/2403.12945) (accessed 2026-05-14)
+- Mobile ALOHA comparison — [arxiv.org/abs/2401.02117](https://arxiv.org/abs/2401.02117) (accessed 2026-05-14)
+- Blog 05 source — `marketing/blog/05-agibot-1m-trajectory-onboarding.md` (Cycle Y)

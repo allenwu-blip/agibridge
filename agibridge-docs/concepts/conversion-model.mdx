@@ -1,0 +1,138 @@
+---
+title: "Conversion model"
+description: "What runs where, what gets retained, what gets validated. The end-to-end pipeline mental model."
+---
+
+This page walks through the conversion pipeline as a data-flow diagram in prose. If you'd rather see the API surface, skip to [API Reference](/api-reference/presign-upload).
+
+## End-to-end pipeline
+
+A conversion has five phases:
+
+```
+[browser] ──(1) presign-upload──→ [backend] ──(returns presigned PUT URL)──→ [browser]
+[browser] ──(2) PUT bytes──────────────────────────────────────→ [Cloudflare R2]
+[browser] ──(3) create-job──────→ [backend] ──(enqueues)──→ [worker]
+[worker]  ──(4) subprocess `embodied-data convert`──→ [converted output to R2]
+[worker]  ──(5) verification re-read──→ [verification report to R2]
+[browser] ──(6) get-job (poll)──→ [backend] (status=done)
+[browser] ──(7) presign-download─→ [backend] ──(returns presigned GET URL)──→ [browser]
+```
+
+Each numbered arrow corresponds to one of the [5 MVP endpoints](/api-reference/presign-upload).
+
+## Where each phase runs
+
+| Phase | Runs on | Why |
+|---|---|---|
+| Upload | Browser → R2 directly | Backend never proxies bytes. Avoids backend bandwidth cost and 100MB+ multipart limits. |
+| Job creation | Backend (FastAPI) | Inserts job record into Postgres, kicks off the worker queue. |
+| Conversion subprocess | Backend worker | Runs `embodied-data convert` as a subprocess against the downloaded input. CPU-only at MVP. |
+| Verification | Backend worker | Same process, re-reads output via `embodied-data validate`. |
+| Download | Browser ← R2 directly | Same reason as upload: no backend bandwidth proxy. |
+
+## What gets retained, and for how long
+
+Three classes of artifact, three different retention models:
+
+### Input tarballs (your upload)
+
+| Tier | Retention |
+|---|---|
+| Free | 24 hours |
+| Solo | 30 days |
+| Team | 30 days |
+| Enterprise | 90 days |
+
+After retention, the input tarball is deleted from R2. You can always re-upload if you want to re-run.
+
+### Converted output tarballs
+
+Same retention windows as input. Re-running the conversion from the original input regenerates byte-identical output (the pinned `embodied-data` v0.3.1 guarantee — see [data formats](/concepts/data-formats)).
+
+### Job records and verification reports
+
+Retained indefinitely under your organization. The dashboard always shows your conversion history (job_id, status, episode count, timestamps). The binary outputs are gone after retention; the metadata records are not.
+
+## Schema validation: four classes
+
+Every completed job produces a verification report covering four schema-integrity classes. This is the same validation the open-source `embodied-data validate` command runs.
+
+<AccordionGroup>
+  <Accordion title="Episode count">
+    Input episode count vs output episode count. If you passed `--max-episodes=N`, output is `min(N, input)`. Mismatches without the flag indicate per-episode failures (skipped episodes are listed with `{error, suggestion}` envelopes).
+  </Accordion>
+  <Accordion title="Action-vector shape">
+    Declared dtype + dim in `info.json` vs actual dtype + dim in episode Parquet. The silent killer for VLA training — dtype downcasts produce exactly the [`lerobot#2689`](https://github.com/huggingface/lerobot/issues/2689) "joints working weirdly" symptom.
+  </Accordion>
+  <Accordion title="Camera column names">
+    Declared keys in `info.json` vs present keys in every episode's `observation.images.*` columns. Catches [`lerobot#2128`](https://github.com/huggingface/lerobot/issues/2128) — `cam_high` declared but `base_0_rgb` present.
+  </Accordion>
+  <Accordion title="Timestamp monotonicity">
+    Strict monotonic increase per episode. v3 hard requirement. Reports `max_jitter_ns` — values above ~1000ns indicate float-precision artifacts worth investigating.
+  </Accordion>
+</AccordionGroup>
+
+## Job state machine
+
+A job moves through one of these terminal-or-active states:
+
+```
+created ──→ uploading ──→ queued ──→ converting ──→ verifying ──→ done
+                                                                  ↓
+                                                                failed
+                                            (any active state)──→ cancelled
+```
+
+Terminal states are `done`, `failed`, `cancelled`. Active states (everything else) get polled by the dashboard at 2-second intervals; queued state polls at 5 seconds (per dashboard polling cadence spec).
+
+## Failure model
+
+A failed job surfaces a structured envelope from the `embodied-data` library:
+
+```json
+{
+  "error": "camera_name_mismatch",
+  "suggestion": "info.json declares observation.images.cam_high but episode_0 contains observation.images.base_0_rgb. Rename or update info.json.",
+  "exit_code": 2
+}
+```
+
+Three classes of failure:
+
+1. **User-fixable** — schema mismatches, unsupported formats, malformed input. The `suggestion` field is actionable; re-upload fixes the issue.
+2. **Transient** — R2 read failure, worker OOM, network drop mid-conversion. The dashboard surfaces a **Retry** button.
+3. **Backend bug** — the worker raised an unexpected exception. The dashboard surfaces a Sentry-issue-linked error code; we get paged automatically.
+
+See the [FAQ Q12](/faq) for the full failure-mode taxonomy.
+
+## Subprocess timeout
+
+Single-job wall-clock cap is 30 minutes on CPU. For larger datasets:
+
+- Pass `--max-episodes=N` to limit conversion size
+- Split the dataset at episode boundaries and run parallel jobs
+- Wait for the GPU conversion path on the roadmap (trigger: first customer with consistent >25-min CPU conversion need)
+
+## What does NOT run
+
+The backend does **not**:
+
+- Run ML inference on customer data
+- Re-encode video on GPU (CPU only at MVP)
+- Train models on uploaded datasets
+- Surface customer data in any public catalog
+- Share data with third parties
+
+See [R3 isolation](/concepts/r3-isolation) for the data-handling invariants.
+
+## Sources
+
+- `embodied-data convert` + `validate` commands — `pypi.org/project/embodied-data/` (accessed 2026-05-14), source at `/Users/allenwu/embodied-data/src/embodied_data/`
+- Verification report fields — `dispatches/D4_specs.md` §4 backend story #4
+- Error envelope shape `{error, suggestion, exit_code}` — `src/embodied_data/_emit.py:32-46`
+- Polling cadences (per-job 2s active / 5s queued) — `frontend/D4_rehydration_spec.md` §3 (Cycle H)
+- Subprocess timeout — `app/api/subprocess_runner.py` (D4 implementation)
+- Retention windows per tier — `DECISIONS.md` DR-018 default #3
+- Camera-name mismatch — [huggingface/lerobot#2128](https://github.com/huggingface/lerobot/issues/2128) (accessed 2026-05-14)
+- Dtype regression — [huggingface/lerobot#2689](https://github.com/huggingface/lerobot/issues/2689) (accessed 2026-05-14)

@@ -1,0 +1,129 @@
+---
+title: "LeRobot v2 → v3 migration"
+description: "The migration guide we wish existed when we hit it. Three error classes, step-by-step path, honest take on local vs hosted."
+---
+
+This is the docs-page version of the blog post "[The LeRobot v2 → v3 migration guide we wish existed when we hit it](https://agibridge.com/blog/lerobot-v2-v3-migration)". Same content, different framing — the blog is the "why you need this", the docs page is the "how to do this".
+
+## TL;DR
+
+LeRobot v3.0 shipped in 2025 as the de-facto VLA training format, consumed by Physical Intelligence's `openpi`, Toyota Research's LBM, NVIDIA's Isaac GR00T. The official migration story is a one-liner utility; the reality, documented across five open `huggingface/lerobot` issues, is rougher. This page covers what changed, the three error classes that account for most stuck migrations, the step-by-step path, and when to use agibridge vs run conversion locally.
+
+## What changed in v3
+
+From the [Hugging Face v3 announcement](https://huggingface.co/blog/lerobot-datasets-v3) (accessed 2026-05-14):
+
+1. **Parquet + MP4 packed layout** — v2 stored per-episode Parquet plus loose MP4. v3 packs multiple episodes per Parquet shard with video chunks aligned to shards.
+2. **Stricter timestamp monotonicity** — strictly increasing per episode. v2 tolerated near-monotonic with float jitter.
+3. **Episode-level metadata moved** to `episodes.jsonl`.
+4. **Camera-name convention enforcement** — keys in `info.json` must match keys present in every episode's Parquet.
+
+None of these are dramatic alone. The breakage comes from the combination plus the fact that every upstream tool that produced v2 datasets has to be re-run, re-tested, and re-pinned.
+
+## Three common error patterns
+
+### Pattern A — Multi-episode crash with mid-pipeline I/O errors
+
+Most-cited single bug. From [`huggingface/lerobot#2158`](https://github.com/huggingface/lerobot/issues/2158) (accessed 2026-05-14):
+
+> `OSError: [Errno 39] Directory not empty`
+> `Application provided invalid, non monotonically increasing dts to muxer`
+
+Both failures together because the v3 packed-shard writer assumes a clean output directory and strictly monotonic timestamps. First error fires when a partial write from a prior attempt left files around. Second fires when source data has sub-microsecond float jitter that rounds to the same integer dts in the MP4 muxer.
+
+You hit this on episode 3 of 200, the converter has already written episodes 0-2, the partial output blocks the retry, and the underlying timestamp jitter is invisible until you inspect raw Parquet.
+
+### Pattern B — Upstream conversion script pinned to wrong LeRobot version
+
+Physical Intelligence's `openpi` ships a `convert_libero_data_to_lerobot.py`. From [`Physical-Intelligence/openpi#443`](https://github.com/Physical-Intelligence/openpi/issues/443) (accessed 2026-05-14):
+
+> "The provided script converting tfds to lerobot dataset format is not compatible with LeRobot dataset v2.1"
+
+The fix becomes: stay pinned to v2 for the whole pipeline OR re-write the converter against v3 yourself. AgiBot World's README has the same shape — pinned to LeRobot v2 commit `2b71789`. A fresh checkout of `main` will not match, and the AgiBot conversion script will silently produce a partially-compatible dataset.
+
+### Pattern C — Successful conversion, regressed training behavior
+
+Worst class because the converter exits 0. From [`huggingface/lerobot#2689`](https://github.com/huggingface/lerobot/issues/2689) (accessed 2026-05-14):
+
+> "after updating the lerobot aloha sim insertion dataset from compatible with 2.1 to 3.0, the training results showed aloha joints working weirdly"
+
+Migration appears successful — file count matches, v3 reader loads it, training starts, loss goes down. Then evaluation shows joints moving wrong. Candidate root causes:
+
+- Timestamp dtype shift (v2.1 stored as `float64`, v3 in some pipelines downcasts to `float32`)
+- Action-dim mismatch between `info.json` declaration and episode contents
+- Frame-alignment drift between camera and action streams when the packed-shard rewriter interpolates differently from v2's per-episode writer
+
+## Step-by-step migration
+
+The following sequence has converted AgiBot World, ALOHA sim, and LIBERO datasets on internal test runs at the `embodied-data` lib level. Treat each step as a checkpoint.
+
+### Step 1 — Verify your v2 source is v2.1, not v2.0
+
+Inspect `info.json` `codebase_version` field. v2.0 datasets need an intermediate v2.0 → v2.1 step before hitting a v3 converter cleanly. v2.1 datasets can go straight to v3. Missing field → predates the field → treat as v2.0.
+
+### Step 2 — Pin LeRobot to a known-good v3 commit, not `main`
+
+LeRobot `main` moves daily. Pin to a tagged release (`v0.3.0` or later on PyPI as of 2026-05-14) and record the exact commit hash in your conversion script's header. Single highest-leverage thing for reproducibility.
+
+### Step 3 — Run a 1-episode dry-run before the full conversion
+
+Convert one episode end-to-end. Open the output Parquet:
+
+```python
+import pyarrow.parquet as pq
+table = pq.read_table("output/data/chunk-000/episode_0.parquet")
+print(table.schema)
+print(table.num_rows)
+```
+
+Verify:
+
+- Episode boundaries correct (`episode_index` column increments as expected)
+- Timestamps strictly monotonic in `timestamp` column
+- Camera keys in `observation.images.*` match `info.json`
+- Action-vector shape matches `info.json` declared dim
+
+### Step 4 — Verify dtypes
+
+The `lerobot#2689` symptom comes from silent dtype shift. After Step 3, check:
+
+```python
+import pyarrow.parquet as pq
+table = pq.read_table("output/data/chunk-000/episode_0.parquet")
+for field in table.schema:
+    print(field.name, field.type)
+```
+
+`timestamp` should be `double` (float64). Action vectors should match what `info.json` declared. If you see `float32` where you expected `float64`, you found a downcast.
+
+### Step 5 — Run on full dataset, check verification
+
+Run the full conversion. Verify the output dataset by re-reading the manifest:
+
+```python
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+ds = LeRobotDataset("./output")
+print(ds.info)
+print(ds.num_episodes, ds.num_frames)
+```
+
+## Doing this on agibridge instead
+
+If the above feels like a lot, agibridge's hosted pipeline pins `embodied-data==0.3.1` against a known-good LeRobot v3 commit and runs Steps 2-5 server-side. You upload, you download, the verification report covers the four schema checks that catch Patterns A/B/C. See [Quickstart](/quickstart).
+
+The honest tradeoff:
+
+- **Self-host** if you have air-gapped infra, data-residency constraints, or >200 conversions/month.
+- **Use agibridge** if you want pinned reproducibility, team workflows, and want to stop debugging conda environments.
+
+See [Pricing concepts](/concepts/pricing) for the full framing.
+
+## Sources
+
+- LeRobot v3 announcement — [huggingface.co/blog/lerobot-datasets-v3](https://huggingface.co/blog/lerobot-datasets-v3) (accessed 2026-05-14)
+- [`lerobot#2158`](https://github.com/huggingface/lerobot/issues/2158) (verbatim quote, accessed 2026-05-14)
+- [`openpi#443`](https://github.com/Physical-Intelligence/openpi/issues/443) (verbatim quote, accessed 2026-05-14)
+- [`lerobot#2689`](https://github.com/huggingface/lerobot/issues/2689) (verbatim quote, accessed 2026-05-14)
+- AgiBot pinned LeRobot v2 commit `2b71789` — [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) (accessed 2026-05-14)
+- Blog 01 — `marketing/blog/01-lerobot-v2-v3-migration.md` (Cycle Y)
+- Cross-citation — `_day1_research/labs_scan.md` §2.A, §2.B, §2.C, §2.E

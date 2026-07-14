@@ -1,0 +1,217 @@
+# CI — agibridge-saas merge gate.
+#
+# Inherits from prior F-1 sprint at allenwu-blip/agibridge
+# (commit d97b0a6 "fix(ci): Dockerfile COPY README.md + pytest path filter")
+# with these intentional changes for the commercial SaaS pivot (DR-001):
+#
+#   1. F-1 banned-word job REMOVED (no F-1 obligation; DR-011 §"Refactor required")
+#   2. Backend + frontend matrix split with path filters (DR-011 frontend lives
+#      in same monorepo)
+#   3. Mock-merge gate added in a SEPARATE workflow (pre-merge-check.yml) per
+#      feedback_pre_merge_integration_test 2026-05-05 standing rule
+#   4. uv lock --locked retained (lesson from prior W1 commit d035c8b)
+#   5. pytest-timeout retained (lesson from prior W1 hang on apt-get install
+#      ffmpeg burning 12m34s — see d97b0a6 commit body + pyproject.toml
+#      [tool.pytest.ini_options].timeout = 120)
+#
+# Source-grounded (URLs accessed 2026-05-13):
+#   - actions/checkout@v4:       https://github.com/actions/checkout
+#   - astral-sh/setup-uv@v3:     https://github.com/astral-sh/setup-uv
+#   - oven-sh/setup-bun@v2:      https://github.com/oven-sh/setup-bun
+#   - GitHub Actions concurrency:
+#     https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/concurrency
+#   - paths filter:
+#     https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#using-filters
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual re-run from Actions tab — useful for forcing a re-verify before merge.
+  workflow_dispatch:
+
+# Cancel in-progress runs on the same ref when a new commit lands (free-tier minute saver).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # dorny/paths-filter@v3 calls the PR Files API on pull_request events;
+  # without this it fails "Resource not accessible by integration" (the
+  # `changes` job then errors and red-gates every PR). push events use git
+  # diff and don't need it, but PR events do.
+  pull-requests: read
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Backend Python matrix
+  # Path filter applied at JOB level (not workflow level) so the frontend job
+  # can still run on backend-only PRs and vice versa. Achieved via a
+  # `changes` job using dorny/paths-filter@v3 to compute booleans.
+  # --------------------------------------------------------------------------
+  changes:
+    name: detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Filter spec docs: https://github.com/dorny/paths-filter#examples
+          filters: |
+            backend:
+              - 'app/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'Dockerfile'
+              - '.github/workflows/ci.yml'
+            frontend:
+              # Only real frontend source triggers the bun build. The frontend
+              # tree is not yet rehydrated (D4 work; spec at
+              # frontend/D4_rehydration_spec.md). A stray spec .md must NOT
+              # red-gate CI on not-yet-existing code. ci.yml self-trigger lives
+              # on the backend filter only (no frontend to rebuild yet).
+              - 'frontend/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,html}'
+              - 'frontend/package.json'
+              - 'frontend/bun.lockb'
+
+  backend-lint:
+    name: backend · ruff check + format
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.30"
+          enable-cache: true
+      - name: Sync deps (incl. dev extras)
+        run: uv sync --frozen --extra dev
+      - name: Ruff check
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  backend-test:
+    name: backend · pytest
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.30"
+          enable-cache: true
+      - name: Install system deps for python-magic + video probes
+        # libmagic = python-magic C binding; ffmpeg = av/video probe path.
+        # Same packages installed in Dockerfile (spec §7 MIME spoofing mitigation).
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libmagic1 ffmpeg
+      - name: Sync deps
+        run: uv sync --frozen --extra dev
+      - name: Run pytest (120s per-test cap)
+        # pyproject.toml [tool.pytest.ini_options].timeout=120 enforced by
+        # pytest-timeout (commit 20d00ba lesson).
+        run: uv run pytest -q
+
+  uv-lock-check:
+    name: backend · uv lock --locked
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv + Python 3.12
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.30"
+      # `uv lock --locked` exits non-zero if pyproject.toml has been edited
+      # without re-locking. Prior W1 hit this; commit d035c8b corrected
+      # `uv lock --check` (silently became no-op) → `--locked` (enforces).
+      - run: uv lock --locked
+
+  frontend-build:
+    name: frontend · bun build
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The `frontend` path filter fires on ANY frontend/** change — including
+      # config/spec files (vercel.json, D4_rehydration_spec.md) that land
+      # before the real Vite app does. Without a real package.json, bun
+      # install hard-fails and red-gates main. Gate the build steps on an
+      # actual buildable project; absent it, the job is a clean success
+      # (ci-green accepts success|skipped). Once the real frontend lands
+      # (package.json present) the build runs for real.
+      - name: Check for buildable frontend
+        id: fe
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "buildable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "buildable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::frontend/ changed but no package.json (config/spec only) — skipping bun build until real frontend lands"
+          fi
+      - name: Set up Bun
+        if: steps.fe.outputs.buildable == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install deps
+        if: steps.fe.outputs.buildable == 'true'
+        working-directory: ./frontend
+        run: bun install --frozen-lockfile
+      - name: Build
+        if: steps.fe.outputs.buildable == 'true'
+        working-directory: ./frontend
+        run: bun run build
+
+  # --------------------------------------------------------------------------
+  # Aggregate "all green" job — branch protection points at THIS, not the
+  # individual jobs, so we can add/remove matrix entries without re-editing
+  # branch protection rules (a GH Actions UX pattern documented at
+  # https://github.com/orgs/community/discussions/26789).
+  # --------------------------------------------------------------------------
+  ci-green:
+    name: ci · all required checks green
+    needs: [backend-lint, backend-test, uv-lock-check, frontend-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify upstream jobs
+        # `needs.<id>.result` is one of: success, failure, cancelled, skipped.
+        # We accept success OR skipped (skipped = path filter said "not needed");
+        # any failure or cancellation flips the gate.
+        run: |
+          set -euo pipefail
+          declare -A results=(
+            [backend-lint]="${{ needs.backend-lint.result }}"
+            [backend-test]="${{ needs.backend-test.result }}"
+            [uv-lock-check]="${{ needs.uv-lock-check.result }}"
+            [frontend-build]="${{ needs.frontend-build.result }}"
+          )
+          fail=0
+          for job in "${!results[@]}"; do
+            r="${results[$job]}"
+            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+              echo "::error::$job is $r"
+              fail=1
+            else
+              echo "$job: $r"
+            fi
+          done
+          exit "$fail"

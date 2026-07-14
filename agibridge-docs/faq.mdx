@@ -1,0 +1,180 @@
+---
+title: "FAQ"
+description: "20 common questions across pricing, technical, account, and security. Inherited from Cycle AD customer-support FAQ."
+---
+
+This FAQ inherits from `support/faq.md` (Cycle AD) and stays in sync with the canonical version. If you can't find an answer here, see the cross-links at the bottom or email support.
+
+## Pricing & billing
+
+### How do I switch between tiers?
+
+Through your Stripe customer portal. Sign in, click **Manage subscription** on the dashboard, you land on Stripe-hosted pages where every paid tier upgrade or downgrade is a single click.
+
+- **Upgrade** (Free → Solo, Solo → Team, Team → Enterprise) takes effect immediately. Stripe prorates the remaining billing-period days.
+- **Downgrade** takes effect at next renewal. You keep the higher tier for the period you already paid for.
+- **Cancellation** also takes effect at next renewal. You can reactivate before that date with no break in service.
+
+### What is your refund policy?
+
+If you subscribed and decided agibridge is not the right tool within 7 days of your first paid charge, reply to your invoice email and I will refund the full month, no questions asked. After 7 days, the standard monthly subscription continues until you cancel through the Stripe customer portal.
+
+Enterprise annual contracts are scoped on the SOW. There is no refund window on the Free tier because there is nothing to refund.
+
+### Do you offer annual billing or annual discount?
+
+Not at launch. Monthly only. Annual billing is W3+ roadmap. Enterprise customers with procurement requirements that need an annual contract can email me — I can scope an annual term and a 15% discount on the Enterprise tier today.
+
+### What are the Free tier limits exactly?
+
+- 1 episode per conversion (preview only)
+- AgiBot World → LeRobot v3 direction only (one-way)
+- 5 jobs per month (soft cap)
+- 24-hour output retention (re-download promptly)
+- Community support only (GitHub Discussions, no SLA)
+- 1 seat per user
+
+You sign in with no credit card and run as many 1-episode previews as you need within the 5-jobs/month cap. When you want full-dataset conversion, upgrade to Solo ($50/mo) and the same uploaded dataset can be resumed without re-uploading.
+
+### What payment methods do you accept?
+
+Stripe Checkout accepts Visa, Mastercard, AmEx, Discover, JCB credit and debit cards, plus Apple Pay and Google Pay where supported. ACH and SEPA bank-debit are not enabled at launch. Enterprise can request NET-30 invoice billing as part of the scope.
+
+## Technical
+
+### What dataset formats does agibridge support?
+
+Bidirectional between **AgiBot World** (OpenDriveLab) and **Hugging Face LeRobot v3**. That is the full surface today. The underlying `embodied-data` library is v0.3.1 GA on PyPI.
+
+Open X-Embodiment, RLDS, LIBERO, and custom HDF5 schemas are on the roadmap, not in the product today. If you have a custom format and an Enterprise budget, email me.
+
+### What is the maximum file size I can upload?
+
+| Tier | Single-upload cap |
+|---|---|
+| Free | 5 GB |
+| Solo | 50 GB |
+| Team | 200 GB |
+| Enterprise | Unlimited (subject to fair-use review) |
+
+Uploads use Cloudflare R2 multipart pre-signed URLs (15-minute TTL on the upload URL).
+
+### How long does a typical conversion take?
+
+For a 100-episode AgiBot World tarball on CPU, conversion typically completes in **under 25 minutes** end-to-end (upload → queue → conversion → verification → download-ready). Smaller previews (1 episode) usually finish in 2-4 minutes.
+
+If a job exceeds 30 minutes without progress, the subprocess is killed and you get a structured failure with a retry link.
+
+### What are the output retention windows?
+
+| Tier | Retention |
+|---|---|
+| Free | 24 hours |
+| Solo | 30 days |
+| Team | 30 days |
+| Enterprise | 90 days |
+
+After retention, the output is deleted from R2. The conversion record stays for your dashboard history; the binary output is not recoverable post-retention. Re-running from the original input regenerates byte-identical output as long as we pin the same `embodied-data` version.
+
+### Do you use GPUs for conversion?
+
+Not today. Conversion runs on CPU through the `embodied-data` library. 100-episode dataset typically completes in under 25 minutes on the hosted backend.
+
+GPU-accelerated conversion is on the roadmap; trigger is the first customer with consistent >25-minute CPU conversion need.
+
+### How do you handle datasets with many episodes?
+
+Pass `--max-episodes=N` in the upload form to limit conversion to the first N episodes. Without the flag, every episode in the tarball is converted in a single job.
+
+Episode-count breakdown shows in the verification report on every completed job.
+
+### How does schema validation work?
+
+Every conversion runs an output verification step covering four classes of schema integrity:
+
+1. **Episode count** — input matches output (or the requested subset)
+2. **Action-vector shape** — dtype and dimensions match the target format spec
+3. **Camera column names** — match what the target format expects (the [`lerobot#2128`](https://github.com/huggingface/lerobot/issues/2128) pain point)
+4. **Timestamp monotonicity** — frame timestamps strictly increasing
+
+If any check fails, the job completes with `status=failed` and a structured `{error, suggestion}` envelope. See the [conversion model concepts page](/concepts/conversion-model) for details.
+
+### What `embodied-data` library version is the hosted backend pinned to?
+
+Currently **`embodied-data==0.3.1`** (PyPI GA release). Every agibridge release publishes the pinned lib version in [/changelog](/changelog) so you can reproduce the same conversion output locally if you self-host. We only bump when the wrapper hits a lib-blocking bug (lib is in maintenance mode).
+
+`pip install embodied-data==0.3.1` produces byte-identical conversion output to the hosted backend.
+
+## Account & organization
+
+### How do I set up an organization for my team?
+
+Sign in through Clerk and your free account auto-provisions a single-seat solo org. When you upgrade to Team or Enterprise, the org name is editable through **Settings → Organization**.
+
+- Set the org name to your company or lab
+- Invite teammates through **Settings → Organization → Invite member**
+- Shared workspace scopes conversion history, R2 storage, and billing to the org
+
+### How do team seat invites work?
+
+Team tier includes 3 seats. Solo is 1 seat. Enterprise is unlimited.
+
+To invite: **Settings → Organization → Invite member**. The teammate gets a Clerk-hosted invite email, creates an account, and on accepting joins your org with full access to shared conversion history.
+
+If you need a 4th seat on Team without going to Enterprise, email me — per-seat add-on pricing is on the roadmap.
+
+### Can I use API keys instead of the web UI?
+
+Not yet at MVP. Programmatic API access with API keys is on the roadmap for the D5+ phase. Today, agibridge is a hosted web UI only. See the [Python SDK](/sdks/python) and [TypeScript SDK](/sdks/typescript) pages for the published contract.
+
+### How do I switch between organizations if I belong to more than one?
+
+The org switcher UI is deferred until we see 3+ multi-org users in production. Today, if you belong to multiple orgs, you can switch by signing out and signing back in — Clerk shows the org chooser on sign-in.
+
+## Security & data handling
+
+### How is my data isolated from other customers?
+
+Every conversion job runs under a per-organization Cloudflare R2 prefix: `orgs/{org_id}/jobs/{job_id}/`. Enforcement is in code:
+
+- The storage layer requires `org_id` as a **keyword-only argument** on every `JobStore.get(*, job_id, org_id)` call.
+- The R2 presign function refuses to sign any output key whose prefix does not match `orgs/{org_id}/jobs/{job_id}/`.
+- The `org_id` is derived from your authenticated Clerk JWT, **not** from request body — a forged request cannot trick the backend into accessing another org's data.
+
+This is a type-enforced invariant (R3 in our risk register), not a soft check. Backend test `test_r3_cross_org_isolation.py` verifies cross-org access returns 404 on every API path.
+
+See the [R3 isolation concepts page](/concepts/r3-isolation) for the full technical detail.
+
+### Is agibridge GDPR-compliant? Do you support data deletion requests?
+
+agibridge stores customer data (account info, conversion job metadata, uploaded datasets, converted outputs) in Clerk (auth), Neon Postgres (job records), and Cloudflare R2 (datasets). All three are GDPR-aware infrastructure providers with EU data-region options on higher tiers.
+
+For a data deletion request:
+
+- **Self-serve**: cancel your subscription through the Stripe customer portal. After the current billing period ends, your uploaded datasets are deleted from R2.
+- **Full deletion request**: reply to any agibridge email with `data deletion request` in the subject. I will purge your Clerk account, Postgres records, and all R2 objects under your org prefix within 30 days, and email you a deletion confirmation with the SHA-256 of the manifest of deleted objects.
+
+A formal data-handling policy page launches W3+. Until then, this FAQ entry is the operational answer.
+
+### Do you train AI models on my uploaded data?
+
+No. Your inputs and outputs are stored under your per-organization R2 prefix and accessed only through authenticated pre-signed URLs scoped to your org. We do not train models on your data, share it with third parties, or surface it in any public catalog. The hosted backend uses your data only to run the conversion you requested and to retain the output through your tier's retention window.
+
+The underlying `embodied-data` library is an Apache-2.0 OSS converter — it does not contain any ML model. agibridge does not run ML inference on customer data at MVP.
+
+## Cross-links
+
+- [Conversion model](/concepts/conversion-model) — how conversion actually runs
+- [R3 isolation](/concepts/r3-isolation) — security invariant detail
+- [Pricing](/concepts/pricing) — tier framing
+- [Quickstart](/quickstart) — 5-step path
+- Canonical FAQ source — `support/faq.md` (Cycle AD)
+
+## Sources
+
+- Canonical FAQ — `support/faq.md` (Cycle AD)
+- Tier pricing + soft caps — `DECISIONS.md` DR-003, DR-018 defaults #2, #3
+- Stripe Customer Portal — [docs.stripe.com/customer-management/integrate-customer-portal](https://docs.stripe.com/customer-management/integrate-customer-portal) (accessed 2026-05-14)
+- `embodied-data` PyPI — [pypi.org/project/embodied-data/](https://pypi.org/project/embodied-data/) (accessed 2026-05-14)
+- R3 invariants — `dispatches/D4_specs.md` §3 amendment #6
+- Camera-name mismatch reference — [huggingface/lerobot#2128](https://github.com/huggingface/lerobot/issues/2128) (accessed 2026-05-14)

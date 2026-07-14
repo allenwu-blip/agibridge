@@ -1,0 +1,168 @@
+---
+title: "Your first conversion"
+description: "Annotated walkthrough: AgiBot World tarball in, verified LeRobot v3 dataset out. With the why behind each step."
+---
+
+This guide is the Quickstart with context. If you want the bare 5-step path with no annotation, read [Quickstart](/quickstart) instead.
+
+## Audience and scope
+
+You have an AgiBot World tarball — either downloaded from [huggingface.co/datasets/agibot-world](https://huggingface.co/datasets/agibot-world) or produced by your own AgiBot-derivative teleop pipeline — and want a LeRobot v3 dataset out. This guide covers a single-direction conversion (`AgiBot World → LeRobot v3`).
+
+For the reverse direction, see [Migrations: AgiBot → LeRobot](/migrations/agibot-to-lerobot).
+
+## Step 1 — Inspect your source dataset
+
+Before uploading, confirm what you have. Open the tarball's `info.json` (or the equivalent metadata file for your AgiBot subset).
+
+You want to verify:
+
+- **Episode count**: the number of episodes you expect to convert. The verification report will check input count matches output count at the end.
+- **Camera streams declared in `info.json`** match the camera streams that actually appear in episode Parquet files. This is the `lerobot#2128` failure mode — `observation.images.cam_high` declared but `observation.images.base_0_rgb` present. agibridge catches this at the verification step, not at training time, but knowing your camera names ahead of time helps you read the verification report.
+- **Action-vector dimension** declared in `info.json`. AgiBot World 2026 uses a bimanual action vector; the exact dim depends on your subset.
+
+## Step 2 — Sign in and create a job
+
+Same as [Quickstart Step 1-2](/quickstart). On the dashboard:
+
+1. Click **New conversion**
+2. Drag the tarball into the upload zone
+3. Pick direction `AgiBot World → LeRobot v3`
+4. Click **Convert**
+
+The browser begins a multipart upload directly to Cloudflare R2 using a pre-signed PUT URL with a 15-minute TTL. If your upload takes longer than 15 minutes (slow connection, large tarball), the dashboard will refresh the pre-signed URL automatically.
+
+<Note>
+The backend never proxies upload bytes. Your data goes browser → R2 directly. The backend only stores the job record in Postgres and the storage prefix is `orgs/{org_id}/jobs/{job_id}/input/`, where `org_id` is derived from your authenticated Clerk JWT — never from request body. See [R3 isolation](/concepts/r3-isolation) for the security invariant.
+</Note>
+
+## Step 3 — Read the progress states
+
+The job moves through five states:
+
+<AccordionGroup>
+  <Accordion title="uploading">
+    Browser → R2. Progress bar tracks bytes transferred. Errors here usually mean network drops; retry from the dashboard.
+  </Accordion>
+  <Accordion title="queued">
+    Backend received the upload-complete notification. Job is in the worker queue. For solo / team tiers, queue wait is typically under 30 seconds during business hours.
+  </Accordion>
+  <Accordion title="converting">
+    `embodied-data convert` subprocess running on the hosted backend. Conversion wall-clock scales with episode count and video frame rate. A 100-episode AgiBot World subset typically completes in under 25 minutes on CPU.
+  </Accordion>
+  <Accordion title="verifying">
+    Re-reads the converted output and runs four classes of schema validation. Takes 5-30 seconds depending on dataset size.
+  </Accordion>
+  <Accordion title="download-ready">
+    Pre-signed download URL surfaces in the dashboard. Free tier: URL is valid for 24 hours. Solo / Team tiers: 30 days. Enterprise: 90 days.
+  </Accordion>
+</AccordionGroup>
+
+## Step 4 — Read the verification report
+
+Every completed job produces a JSON verification report. The four classes of validation:
+
+### 4a — Episode count
+
+```json
+{
+  "episode_count": {
+    "input": 100,
+    "output": 100,
+    "status": "ok"
+  }
+}
+```
+
+If you passed `--max-episodes=N`, output count will be `min(N, input)`. A mismatch with no `--max-episodes` flag means some episodes failed to convert; see the `skipped_episodes` field for the `{error, suggestion}` envelope per skipped episode.
+
+### 4b — Action-vector shape
+
+```json
+{
+  "action_vector": {
+    "expected_dtype": "float32",
+    "actual_dtype": "float32",
+    "expected_dim": 14,
+    "actual_dim": 14,
+    "status": "ok"
+  }
+}
+```
+
+Dtype mismatches are the silent killer for VLA training — v2.1 stored `timestamp` as `float64` and some v3 pipelines downcast to `float32`, which is exactly the [`lerobot#2689`](https://github.com/huggingface/lerobot/issues/2689) "ALOHA joints working weirdly" symptom.
+
+### 4c — Camera column names
+
+```json
+{
+  "cameras": {
+    "declared": ["observation.images.cam_high", "observation.images.cam_left_wrist"],
+    "present": ["observation.images.cam_high", "observation.images.cam_left_wrist"],
+    "status": "ok"
+  }
+}
+```
+
+This is the [`lerobot#2128`](https://github.com/huggingface/lerobot/issues/2128) failure mode. Mismatches here surface as a verification failure at upload time, not as a silent training regression weeks later.
+
+### 4d — Timestamp monotonicity
+
+```json
+{
+  "timestamps": {
+    "monotonic": true,
+    "max_jitter_ns": 0,
+    "status": "ok"
+  }
+}
+```
+
+Strict monotonicity per episode is a v3 requirement. The `max_jitter_ns` field reports the largest float-precision artifact observed; values above ~1000ns indicate a downstream dtype problem worth investigating.
+
+## Step 5 — Download and integrate
+
+Click **Download LeRobot v3 dataset** to get a `.tar.gz` of the converted output. Click **Download verification report** to get the JSON above.
+
+To spot-check locally:
+
+```bash
+pip install lerobot
+lerobot-edit-dataset --repo-id local:./downloaded_dataset --inspect
+```
+
+Or open the Parquet directly:
+
+```python
+import pyarrow.parquet as pq
+
+table = pq.read_table("downloaded_dataset/data/chunk-000/episode_0.parquet")
+print(table.schema)
+print(table.num_rows)
+```
+
+## What if the conversion fails?
+
+A failed job surfaces a structured `{error, suggestion}` envelope from the `embodied-data` library. Common failure modes:
+
+- **Camera-name mismatch** — `info.json` declares a camera key that's missing from episode Parquet files
+- **Timestamp non-monotonicity** — float jitter in source data violates v3 strict-monotonic requirement
+- **Multipart upload TTL expired** — re-upload from the dashboard
+- **Subprocess timeout** — single-job wall-clock cap is 30 minutes on CPU; for larger datasets, split at episode boundaries or upgrade to a tier with GPU support (roadmap)
+
+See the [FAQ](/faq) Q12 and the support error guide for the full failure-mode taxonomy.
+
+## What's next
+
+- [Concepts: R3 isolation](/concepts/r3-isolation) — how your data is segregated from other customers
+- [Migrations: LeRobot v2 → v3](/migrations/lerobot-v2-to-v3) — the migration story for legacy v2 datasets
+- [API Reference: create-job](/api-reference/create-job) — the programmatic version of this flow
+
+## Sources
+
+- AgiBot World 2026 download — [huggingface.co/datasets/agibot-world](https://huggingface.co/datasets/agibot-world) (accessed 2026-05-14)
+- Camera-name mismatch failure mode — [huggingface/lerobot#2128](https://github.com/huggingface/lerobot/issues/2128) (accessed 2026-05-14)
+- Timestamp dtype regression — [huggingface/lerobot#2689](https://github.com/huggingface/lerobot/issues/2689) (accessed 2026-05-14)
+- `embodied-data` error envelope shape — `src/embodied_data/_emit.py:32-46`
+- Verification report fields — `dispatches/D4_specs.md` §4 backend story #4
+- R2 multipart pre-signed URL TTL — Cloudflare R2 docs (15-min default), [developers.cloudflare.com/r2/api/s3/presigned-urls/](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) (accessed 2026-05-14)

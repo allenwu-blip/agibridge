@@ -1,0 +1,74 @@
+---
+title: "Data formats"
+description: "AgiBot World and Hugging Face LeRobot v3 — what they are, what changed in v3, and why the bidirectional converter exists."
+---
+
+agibridge converts between exactly two formats today. This page is the mental model for both.
+
+## AgiBot World
+
+**Maintainer**: OpenDriveLab + AgiBot
+**Release scope (2026)**: 1,001,552 trajectories / 2,976.4 hrs / 217 tasks / 87 skills / 106 scenes
+**License**: research-permissive (see [AgiBot World dataset card](https://huggingface.co/datasets/agibot-world))
+**On-disk layout**: per-episode directories under a top-level manifest, video tracks stored as MP4, action and proprioception streams stored as Parquet, metadata in JSON
+**Repo**: [github.com/OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World)
+
+AgiBot World is the largest open humanoid bimanual manipulation dataset by trajectory count as of 2026 and the data substrate for AgiBot's own GO-1 pre-training plus a growing set of derivative VLA models. Two structural quirks matter:
+
+1. **The official repo pins LeRobot v2 commit `2b71789`**, not v3. A fresh `pip install lerobot` will not match this commit and the AgiBot conversion script will silently produce a partially-compatible dataset.
+2. **The AgiBot README requires a separate conda environment** to avoid TensorFlow / PyTorch conflicts, because TensorFlow is required to read the RLDS-source format on the way in.
+
+agibridge runs the right conda environment server-side. You never see TensorFlow versions, never debug a conda solve.
+
+## Hugging Face LeRobot v3
+
+**Maintainer**: Hugging Face (`huggingface/lerobot`)
+**Announcement**: [huggingface.co/blog/lerobot-datasets-v3](https://huggingface.co/blog/lerobot-datasets-v3) (accessed 2026-05-14)
+**On-disk layout**: packed Parquet shards (multiple episodes per file) + MP4 video chunks aligned to shards, `episodes.jsonl` for episode-level metadata, `info.json` for top-level schema
+**Consumers**: Physical Intelligence's `openpi` / π0, Toyota Research's LBM, NVIDIA Isaac GR00T, AgiBot derivatives
+**Repo**: [github.com/huggingface/lerobot](https://github.com/huggingface/lerobot)
+
+v3 became the de-facto VLA training format in 2025. The headline changes from v2 / v2.1:
+
+1. **Parquet + MP4 packed layout**. v2 stored per-episode Parquet files plus loose MP4s. v3 packs multiple episodes into a single Parquet shard and aligns video chunks to those shards. Reduced storage and improved streaming throughput, but altered the on-disk layout every downstream script assumes.
+2. **Stricter timestamp monotonicity**. v3 expects strictly increasing `timestamp` per episode. v2 tolerated near-monotonic timestamps with small float jitter.
+3. **Episode-level metadata moved**. `episodes.jsonl` consolidated metadata that was scattered in v2.
+4. **Camera-name convention enforcement**. v3 validates that camera keys declared in `info.json` match keys present in every episode's Parquet.
+
+None of those changes are individually dramatic. The breakage comes from the combination plus the fact that every upstream tool that produced v2 datasets has to be re-run, re-tested, and re-pinned — and most of them aren't being actively maintained.
+
+## Why bidirectional matters
+
+Most published "any-format → LeRobot" converters move in one direction only. Three reasons bidirectional matters:
+
+1. **Cross-embodiment evaluation**. You train on LeRobot v3 (because π0 / LBM / GR00T expect it) and want to evaluate on AgiBot's own benchmark harness (which expects AgiBot format).
+2. **AgiBot toolchain interop**. AgiBot's training pipelines, validation scripts, and visualization tools expect their native format. If you produced data in LeRobot v3 and want to plug into AgiBot's toolchain, you need the reverse direction.
+3. **Format-agnostic data collection**. Some teams collect with LeRobot tooling but want to publish a subset into the AgiBot ecosystem.
+
+The reverse direction has a wrinkle: AgiBot's control-frequency convention differs from LeRobot's. AgiBot World 2026 changed control frequency from 30 Hz to 10 Hz between releases (per the AgiBot README). The converter handles this re-sampling, but the verification report will flag any frame-alignment drift that exceeds tolerance.
+
+## What's the same under both formats
+
+The `embodied-data` library is the same code under self-host (`pip install embodied-data`) and the hosted backend. agibridge does not maintain a fork. If you self-host with the same pinned version, you get byte-identical conversion output.
+
+This is deliberate. We charge for the wrapper (auth, storage, team workflows, pinned pipeline), not for the converter. The converter stays Apache-2.0 open source. See [Pricing concepts](/concepts/pricing) for the honest framing.
+
+## What we don't convert (yet)
+
+The following formats are on the roadmap but not in the product today:
+
+- **Open X-Embodiment / OXE** — the cross-institution standardized format
+- **RLDS** — the TensorFlow Datasets serialization (AgiBot's own source format on the way in)
+- **LIBERO** — the language-conditioned manipulation benchmark format
+- **Custom HDF5 schemas** — common in academic robotics labs
+
+If you have an Enterprise budget and a custom format need, contact us — one-off conversions are in scope for Enterprise.
+
+## Sources
+
+- AgiBot World 2026 release stats — [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) README (accessed 2026-05-14)
+- AgiBot World Colosseo paper — [arxiv.org/abs/2503.06669](https://arxiv.org/abs/2503.06669) (accessed 2026-05-14)
+- LeRobot v3 announcement — [huggingface.co/blog/lerobot-datasets-v3](https://huggingface.co/blog/lerobot-datasets-v3) (accessed 2026-05-14)
+- LeRobot repo — [github.com/huggingface/lerobot](https://github.com/huggingface/lerobot) (accessed 2026-05-14)
+- AgiBot pinned LeRobot v2 commit — [OpenDriveLab/AgiBot-World](https://github.com/OpenDriveLab/AgiBot-World) README §"Quick start" (accessed 2026-05-14)
+- AgiBot control-freq 30→10 Hz — `_day1_research/labs_scan.md` §2.C
